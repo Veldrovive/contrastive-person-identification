@@ -189,6 +189,13 @@ def visualize_embeddings(session_embeddings: dict[tuple[str, str], list[np.ndarr
         labeled_embeddings[label].append(embedding)
     labeled_embeddings = {label: np.array(embeddings) for label, embeddings in labeled_embeddings.items()}
 
+    # Defining size. If there are more than 1000 embeddings, we use size 3. More than 10000 and we use size 1
+    size = 5
+    if len(embeddings) > 10000:
+        size = 1
+    elif len(embeddings) > 1000:
+        size = 3
+
     # Plot the embeddings
     fig, ax = plt.subplots(1, 1)
     for label, embeddings in labeled_embeddings.items():
@@ -196,7 +203,7 @@ def visualize_embeddings(session_embeddings: dict[tuple[str, str], list[np.ndarr
             embeddings[:, 0],
             embeddings[:, 1],
             label=label,
-            s=5,
+            s=size
         )
     ax.set_title(title)
 

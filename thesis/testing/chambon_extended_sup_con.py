@@ -12,7 +12,7 @@ import matplotlib.pyplot as plt
 from sklearn.neighbors import NearestNeighbors
 from pydantic import RootModel
 
-from thesis.structs.chambon_structs import ChambonExtendableConfig
+from thesis.structs.chambon_structs import ChambonExtendableConfig, ChambonConfig
 from thesis.structs.contrastive_head_structs import ContrastiveHeadConfig, HeadStyle
 # from thesis.datasets.braindecode.PhysionetMI import get_physionet_datasets, PhysionetMIDatasetConfig, get_physionet_dataloaders, DataloaderConfig
 from thesis.datasets.subject_dataset import load_subject_datasets, concatenate_datasets, get_dataset_split, SubjectDataset, get_subject_datasets_in_dir
@@ -25,6 +25,7 @@ from thesis.loss_functions.sup_con import SupConLoss
 from thesis.evaluation.knn import get_embeddings, get_cross_session_knn_metrics, visualize_embeddings, visualize_confusion_matrix
 
 from thesis.models.chambon_extendable import ChambonNetExtendable
+from thesis.models.chambon import ChambonNet
 from thesis.models.contrastive_head import HeadStyle, create_contrastive_module
 
 import wandb
@@ -43,6 +44,22 @@ def create_model(t_config: TrainingConfig, m_config: ChambonExtendableConfig, co
 
     # Create the optimizer
     optimizer = torch.optim.Adam(full_model.parameters(), lr=1e-4)
+
+    return full_model, optimizer
+
+def create_model_old(t_config: TrainingConfig, m_config: ChambonConfig, contrastive_loss_size: int = 128):
+    model = ChambonNet(m_config)
+    test_data = torch.randn(1, m_config.C, m_config.T)
+    test_output = model(test_data)
+    embedding_size = test_output.shape[1]
+    head_config = ContrastiveHeadConfig(logit_dimension=embedding_size, c_loss_dimension=contrastive_loss_size, head_style=HeadStyle.LINEAR, layer_sizes=[contrastive_loss_size])
+    full_model = create_contrastive_module(model, head_config)
+
+    # Move the model to the device
+    full_model = full_model.to(t_config.device)
+
+    # Create the optimizer
+    optimizer = torch.optim.Adam(full_model.parameters(), lr=1e-3)
 
     return full_model, optimizer
 
@@ -389,7 +406,7 @@ def train(training_state: TrainingState, training_config: TrainingConfig, model,
 
 if __name__ == "__main__":
     training_state = TrainingState()
-    wandb.init(project="thesis-sup-con", mode="offline")
+    wandb.init(project="thesis-sup-con", mode="online")
     training_state.run_id = wandb.run.id
 
     base_path = Path(__file__).parent / f"experiments/chambon_sup_con/kaya/{training_state.run_id}"
@@ -398,12 +415,19 @@ if __name__ == "__main__":
     visuals_path = base_path / "visuals"
     visuals_path.mkdir(parents=True, exist_ok=True)
 
-    braindecode_dataset_base_path = Path(__file__).parent.parent / 'datasets' / 'braindecode' / 'datasets'
-    kaya_dataset_path = Path(__file__).parent.parent / 'datasets' / 'large_eeg' / 'processed_data_ica_highpass_filtered_resampled_120'
+    braindecode_dataset_base_path = Path(__file__).parent.parent / 'datasets' / 'braindecode' / 'datasets_data'
+    kaya_dataset_path = Path(__file__).parent.parent / 'datasets' / 'large_eeg' / 'datasets_data'
+    # raw_datasets = {
+    #     # 'physionet': (braindecode_dataset_base_path / 'physionet', DatasetSplitConfig(train_prop=1, extrap_val_prop=0.0, extrap_test_prop=0, intra_val_prop=0.0, intra_test_prop=0)),  # only has one session so invalid for evaluation
+    #     'lee2019': (braindecode_dataset_base_path / 'lee2019_512_ica_highpass_filtered_resampled_120', DatasetSplitConfig(train_prop=0.8, extrap_val_prop=0.1, extrap_test_prop=0, intra_val_prop=0.1, intra_test_prop=0)),
+    #     'kaya': (kaya_dataset_path, DatasetSplitConfig(train_prop=0.80, extrap_val_prop=0.15, extrap_test_prop=0, intra_val_prop=0.05, intra_test_prop=0))
+    # }
+    # Update: Now using a consistent extrap set for all experiments. This also forces a consistent intra set, but the exact split in each run is not consistent
     raw_datasets = {
-        # 'physionet': (braindecode_dataset_base_path / 'physionet', DatasetSplitConfig(train_prop=1, extrap_val_prop=0.0, extrap_test_prop=0, intra_val_prop=0.0, intra_test_prop=0)),  # only has one session so invalid for evaluation
-        'lee2019': (braindecode_dataset_base_path / 'lee2019_512_ica_highpass_filtered_resampled_120', DatasetSplitConfig(train_prop=0.8, extrap_val_prop=0.1, extrap_test_prop=0, intra_val_prop=0.1, intra_test_prop=0)),
-        'kaya': (kaya_dataset_path, DatasetSplitConfig(train_prop=0.80, extrap_val_prop=0.15, extrap_test_prop=0, intra_val_prop=0.05, intra_test_prop=0))
+        'lee2019_train': (braindecode_dataset_base_path / 'lee2019_filtered_train_intra_set', DatasetSplitConfig(train_prop=0.9, extrap_val_prop=0, extrap_test_prop=0, intra_val_prop=0.1, intra_test_prop=0)),
+        'lee2019_extrap': (braindecode_dataset_base_path / 'lee2019_filtered_extrap_set', DatasetSplitConfig(train_prop=0, extrap_val_prop=1, extrap_test_prop=0, intra_val_prop=0, intra_test_prop=0)),
+        'kaya_train': (kaya_dataset_path / 'filtered_train_intra_set', DatasetSplitConfig(train_prop=0.95, extrap_val_prop=0, extrap_test_prop=0, intra_val_prop=0.05, intra_test_prop=0)),
+        'kaya_extrap': (kaya_dataset_path / 'filtered_extrap_set', DatasetSplitConfig(train_prop=0, extrap_val_prop=1, extrap_test_prop=0, intra_val_prop=0, intra_test_prop=0))
     }
 
     preprocess_config = MetaPreprocessorConfig(
@@ -416,9 +440,9 @@ if __name__ == "__main__":
     )
 
     augmentation_config = SessionVarianceAugmentationConfig(
-        apply_gaussian_noise=True,
+        apply_gaussian_noise=False,
         relative_noise_amplitude=0.01,
-        apply_per_channel_amplitude_scaling=True,
+        apply_per_channel_amplitude_scaling=False,
         min_amplitude_scaling=0.9,
         max_amplitude_scaling=1.1,
     )
@@ -485,9 +509,13 @@ if __name__ == "__main__":
         run_intra_val=True
     )
 
-    model_config = ChambonExtendableConfig(C=num_channels, T=base_dataset_config.window_size_s*freq, k=63, m=2, num_blocks=9, D=512)
+    # model_config = ChambonExtendableConfig(C=num_channels, T=base_dataset_config.window_size_s*freq, k=63, m=2, num_blocks=9, D=512)
+    # print("Creating model")
+    # model, optimizer = create_model(training_config, model_config)
+
+    model_config = ChambonConfig(C=num_channels, T=base_dataset_config.window_size_s*freq, k=63, m=16)
     print("Creating model")
-    model, optimizer = create_model(training_config, model_config)
+    model, optimizer = create_model_old(training_config, model_config)
 
     if training_config.load_checkpoint:
         load_checkpoint(training_state, training_config, model, optimizer)
