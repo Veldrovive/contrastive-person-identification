@@ -22,7 +22,7 @@ class SupConLoss(nn.Module):
         """
         mN = features.shape[0]
         # Compute the similarity matrix and label mask
-        similarity_matrix = torch.matmul(features, features.T)
+        similarity_matrix = torch.matmul(features, features.T) / self.temperature
         labels = labels.contiguous().view(-1, 1)
         label_mask = torch.eq(labels, labels.T).float()
 
