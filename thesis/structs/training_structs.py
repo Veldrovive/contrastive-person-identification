@@ -23,6 +23,9 @@ class TrainingConfig(BaseModel):
     run_extrap_val: bool = Field(True, description="Whether to run the evaluation on the extrapolation validation set")
     run_intra_val: bool = Field(True, description="Whether to run the evaluation on the intra validation set")
 
+    # Loss function
+    loss_temperature: float = Field(0.1, description="The temperature to use for the loss function")
+
 class TrainingState(BaseModel):
     epoch: int = Field(0, description="The current epoch")
     step: int = Field(0, description="The current wandb step")

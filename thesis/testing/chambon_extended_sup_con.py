@@ -347,7 +347,7 @@ def train(training_state: TrainingState, training_config: TrainingConfig, model,
     print(f"Training model with {num_params} parameters")
 
     unique_subject_id_to_label = { id: i for i, id in enumerate(dataloaders['train'].dataset.unique_subjects) }
-    loss_func = SupConLoss()
+    loss_func = SupConLoss(temperature=training_config.loss_temperature)
 
     if training_config.evaluate_first:
         # Run an initial evaluation
@@ -506,7 +506,9 @@ if __name__ == "__main__":
         evaluation_k=5,
 
         run_extrap_val=True,
-        run_intra_val=True
+        run_intra_val=True,
+
+        loss_temperature=0.1,
     )
 
     # model_config = ChambonExtendableConfig(C=num_channels, T=base_dataset_config.window_size_s*freq, k=63, m=2, num_blocks=9, D=512)
