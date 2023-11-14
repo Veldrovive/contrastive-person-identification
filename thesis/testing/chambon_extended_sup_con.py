@@ -185,7 +185,7 @@ def evaluate_model(training_state: TrainingState, training_config: TrainingConfi
 
     
 def get_dataloaders(
-    base_datasets: dict[str, tuple[Path, DatasetSplitConfig]],
+    base_datasets: dict[str, tuple[Path, DatasetSplitConfig] | tuple[Path, DatasetSplitConfig, int]],  # Path, split config, and optionally the number of subjects to use
     dataset_configs: dict[str, tuple[ContrastiveSubjectDatasetConfig, DataloaderConfig]],  # Keys are "train", "extrap_val", "extrap_test", "intra_val", "intra_test". All keys must be present
 ):
     # We require that all dataset configs have the same window size. Enforce this now
@@ -202,9 +202,16 @@ def get_dataloaders(
         "intra_val": {},
         "intra_test": {}
     }  # Maps from "train"... to the loaded datasets from each path
-    for dataset_name, (dataset_path, split_config) in base_datasets.items():
+    for dataset_name, load_config in base_datasets.items():
+        if len(load_config) == 2:
+            dataset_path, split_config = load_config
+            n_subjects = None
+        elif len(load_config) == 3:
+            dataset_path, split_config, n_subjects = load_config
         print(f"Loading dataset {dataset_name}")
         dataset_subjects = get_subject_datasets_in_dir(dataset_path)
+        if n_subjects is not None:
+            dataset_subjects = dataset_subjects[:n_subjects]
         subject_datasets = load_subject_datasets(dataset_path, subjects=dataset_subjects)
         # Get the frequency of this dataset
         dataset_freq = list(subject_datasets[dataset_subjects[0]].root.values())[0].metadata.freq
@@ -250,60 +257,6 @@ def get_dataloaders(
             assert freq == dataloader.dataset.freq, "All datasets must use the same frequency"
     
     return dataloaders, len(channels), freq
-
-
-# def get_dataloaders(
-#     dataset_paths: dict[str, Path],
-#     dataset_config: ContrastiveSubjectDatasetConfig,
-#     dataloader_config: DataloaderConfig,
-#     split_config: DatasetSplitConfig,
-#     n_anchors: int = 2,
-#     preprocess_config = None,
-#     train_subject_limit: int | None = None
-# ):
-#     datasets = {}
-#     for dataset_name, dataset_path in dataset_paths.items():
-#         print(f"Loading dataset {dataset_name}")
-#         datasets[dataset_name] = load_subject_datasets(dataset_path)
-#     dataset = concatenate_datasets(datasets)
-
-#     freq = list(list(dataset.values())[0].model_dump().values())[0]["metadata"]["freq"]  # Don't question it
-#     window_size_samples = int(dataset_config.window_size_s * freq)
-
-#     split_datasets = get_dataset_split(dataset, split_config.train_prop, split_config.extrap_val_prop, split_config.extrap_test_prop, split_config.intra_val_prop, split_config.intra_test_prop, window_size_samples=window_size_samples)
-#     if train_subject_limit is not None:
-#         # Limit the number of subjects in the training set
-#         train_subjects = list(split_datasets["train"].keys())
-#         train_subjects = train_subjects[:train_subject_limit]
-#         split_datasets["train"] = {subject: split_datasets["train"][subject] for subject in train_subjects}
-#     # contrastive_datasets = {key: ContrastiveSubjectDataset(dataset, dataset_config, preprocess_fn=preprocess_fn) for key, dataset in split_datasets.items()}
-#     contrastive_datasets = {}
-#     for key, dataset in split_datasets.items():
-#         if key != "train":
-#             # Then we are actually going to change the config slightly because resampling over subjects in the eval
-#             # sets is not supported
-#             indiv_dataset_config = dataset_config.copy()
-#             indiv_dataset_config.sample_over_subjects_toggle = False
-#         else:
-#             indiv_dataset_config = dataset_config
-
-#         if len(dataset) == 0:
-#             contrastive_datasets[key] = None
-#         else:
-#             contrastive_datasets[key] = ContrastiveSubjectDataset(dataset, indiv_dataset_config, n_pos=n_anchors - 1, n_neg=0, preprocess_config=preprocess_config)
-#     # For a sanity check, make sure that all the datasets are using the same channels
-#     # I think it is possible for the extrap set to have chosen different channels
-#     channels = None
-#     for contrastive_dataset in contrastive_datasets.values():
-#         if contrastive_dataset is None:
-#             continue
-#         if channels is None:
-#             channels = contrastive_dataset.channels
-#         else:
-#             assert channels == contrastive_dataset.channels, "All datasets must use the same channels"
-#     # Get the window size in samples
-#     loaders = get_contrastive_subject_loaders(contrastive_datasets, dataloader_config)
-#     return loaders, len(channels), window_size_samples
 
 def save_checkpoint(training_state: TrainingState, training_config: TrainingConfig, model, optimizer):
     """
@@ -417,16 +370,14 @@ if __name__ == "__main__":
 
     braindecode_dataset_base_path = Path(__file__).parent.parent / 'datasets' / 'braindecode' / 'datasets_data'
     kaya_dataset_path = Path(__file__).parent.parent / 'datasets' / 'large_eeg' / 'datasets_data'
-    # raw_datasets = {
-    #     # 'physionet': (braindecode_dataset_base_path / 'physionet', DatasetSplitConfig(train_prop=1, extrap_val_prop=0.0, extrap_test_prop=0, intra_val_prop=0.0, intra_test_prop=0)),  # only has one session so invalid for evaluation
-    #     'lee2019': (braindecode_dataset_base_path / 'lee2019_512_ica_highpass_filtered_resampled_120', DatasetSplitConfig(train_prop=0.8, extrap_val_prop=0.1, extrap_test_prop=0, intra_val_prop=0.1, intra_test_prop=0)),
-    #     'kaya': (kaya_dataset_path, DatasetSplitConfig(train_prop=0.80, extrap_val_prop=0.15, extrap_test_prop=0, intra_val_prop=0.05, intra_test_prop=0))
-    # }
     # Update: Now using a consistent extrap set for all experiments. This also forces a consistent intra set, but the exact split in each run is not consistent
     raw_datasets = {
+        'physionet': (braindecode_dataset_base_path / 'physionet', DatasetSplitConfig(train_prop=1, extrap_val_prop=0.0, extrap_test_prop=0, intra_val_prop=0.0, intra_test_prop=0)),  # only has one session so invalid for evaluation
         'lee2019_train': (braindecode_dataset_base_path / 'lee2019_filtered_train_intra_set', DatasetSplitConfig(train_prop=0.9, extrap_val_prop=0, extrap_test_prop=0, intra_val_prop=0.1, intra_test_prop=0)),
+        # 'lee2019_train_intra_only': (braindecode_dataset_base_path / 'lee2019_filtered_train_intra_set', DatasetSplitConfig(train_prop=0, extrap_val_prop=0, extrap_test_prop=0, intra_val_prop=1, intra_test_prop=0), 6),
         'lee2019_extrap': (braindecode_dataset_base_path / 'lee2019_filtered_extrap_set', DatasetSplitConfig(train_prop=0, extrap_val_prop=1, extrap_test_prop=0, intra_val_prop=0, intra_test_prop=0)),
         'kaya_train': (kaya_dataset_path / 'filtered_train_intra_set', DatasetSplitConfig(train_prop=0.95, extrap_val_prop=0, extrap_test_prop=0, intra_val_prop=0.05, intra_test_prop=0)),
+        # 'kaya_train_intra_only': (kaya_dataset_path / 'filtered_train_intra_set', DatasetSplitConfig(train_prop=0, extrap_val_prop=0, extrap_test_prop=0, intra_val_prop=1, intra_test_prop=0), 2),
         'kaya_extrap': (kaya_dataset_path / 'filtered_extrap_set', DatasetSplitConfig(train_prop=0, extrap_val_prop=1, extrap_test_prop=0, intra_val_prop=0, intra_test_prop=0))
     }
 
@@ -442,9 +393,14 @@ if __name__ == "__main__":
     augmentation_config = SessionVarianceAugmentationConfig(
         apply_gaussian_noise=False,
         relative_noise_amplitude=0.01,
+
         apply_per_channel_amplitude_scaling=False,
         min_amplitude_scaling=0.9,
         max_amplitude_scaling=1.1,
+
+        apply_per_channel_time_offset=False,
+        min_time_offset = -1,
+        max_time_offset = 1
     )
 
     train_dataloader_config = DataloaderConfig(
@@ -456,8 +412,9 @@ if __name__ == "__main__":
         shuffle = False,
     )
     base_dataset_config = ContrastiveSubjectDatasetConfig(
+        target_channels=['C3', 'C4', 'Cz', 'F3', 'F4', 'F7', 'F8', 'Fp1', 'Fp2', 'Fz', 'O1', 'O2', 'P3', 'P4', 'P7', 'P8', 'Pz', 'T7', 'T8'],
         toggle_direct_sum_on=False,
-        window_size_s=64,
+        window_size_s=8,
         window_stride_s=2,
         sample_over_subjects_toggle=True,
         positive_separate_session=True,
@@ -488,8 +445,13 @@ if __name__ == "__main__":
     print("Train Dataset:")
     loaders["train"].dataset.description()
 
-    print("Intra-Val Dataset:")
-    loaders["intra_val"].dataset.description()
+    if loaders["intra_val"] is not None:
+        print("Intra-Val Dataset:")
+        loaders["intra_val"].dataset.description()
+
+    if loaders["extrap_val"] is not None:
+        print("Extrap-Val Dataset:")
+        loaders["extrap_val"].dataset.description()
 
     # for i in range(10):
     #     loaders["train"].dataset.visualize_item(i)
@@ -499,9 +461,9 @@ if __name__ == "__main__":
         checkpoint_path=checkpoints_path,
         evaluation_visualization_path=visuals_path,
         load_checkpoint=False,
-        checkpoint_load_path=None,
+        checkpoint_load_path=Path("/Users/aidan/projects/engsci/year4/thesis/implementation/thesis/testing/experiments/chambon_sup_con/kaya/gl0yor99/checkpoints/checkpoint_5.pth"),
         evaluate_first=True,
-        epochs=500,
+        epochs=100,
         epoch_length=512,
         evaluation_k=5,
 

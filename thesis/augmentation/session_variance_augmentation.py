@@ -28,15 +28,18 @@ def scale_channel_amplitude(data, min_ratio, max_ratio):
     scales = torch.rand(data.shape[0], 1) * (max_ratio - min_ratio) + min_ratio
     return data * scales
 
-def offset_chanel(data, min_offset: int, max_offset: int):
+def offset_channel(data, min_offset: int, max_offset: int):
     """
     Offsets each channel a consistent amount. Edge values are rolled over
     """
-    # offsets = np.random.randint(min_offset, max_offset, size=(data.shape[0], 1))
-    # return np.roll(data, offsets, axis=1)
-    # Re implement this in pytorch
-    offsets = torch.randint(min_offset, max_offset, size=(data.shape[0], 1))
-    return torch.roll(data, offsets, dims=1)
+    offsets = torch.randint(min_offset, max_offset+1, (data.shape[0],))
+    data = torch.stack([torch.roll(data[i], shifts=offsets[i].item()) for i in range(data.shape[0])])
+
+    return data
+
+if __name__ == "__main__":
+    t = torch.arange(4*10).reshape(4, 10)
+    offset_channel(t, -1, 1)
 
 
 def preprocessor_factory(config: SessionVarianceAugmentationConfig):
@@ -53,7 +56,7 @@ def preprocessor_factory(config: SessionVarianceAugmentationConfig):
         if config.apply_per_channel_amplitude_scaling:
             data = scale_channel_amplitude(data, config.min_amplitude_scaling, config.max_amplitude_scaling)
         if config.apply_per_channel_time_offset:
-            data = offset_chanel(data, config.min_time_offset, config.max_time_offset)
+            data = offset_channel(data, config.min_time_offset, config.max_time_offset)
         return data
     
     return augment
