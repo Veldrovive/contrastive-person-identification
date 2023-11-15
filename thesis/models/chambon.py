@@ -61,7 +61,7 @@ class ChambonNet(nn.Module):
         return x
 
 if __name__ == "__main__":
-    config = ChambonConfig(C=64, T=360, k=63, m=16)
+    config = ChambonConfig(C=19, T=120, k=63, m=8)
     model = ChambonNet(config)
     test_input = torch.randn(32, config.C, config.T)
     output = model(test_input)

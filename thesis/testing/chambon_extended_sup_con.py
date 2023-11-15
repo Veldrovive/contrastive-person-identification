@@ -186,8 +186,14 @@ def evaluate_model(training_state: TrainingState, training_config: TrainingConfi
     
 def get_dataloaders(
     base_datasets: dict[str, tuple[Path, DatasetSplitConfig] | tuple[Path, DatasetSplitConfig, int]],  # Path, split config, and optionally the number of subjects to use
-    dataset_configs: dict[str, tuple[ContrastiveSubjectDatasetConfig, DataloaderConfig]],  # Keys are "train", "extrap_val", "extrap_test", "intra_val", "intra_test". All keys must be present
+    dataset_configs: dict[str, tuple[ContrastiveSubjectDatasetConfig, DataloaderConfig]],  # Keys are "train", "extrap_val", "extrap_test", "intra_val", "intra_test", "downstream". All keys must be present
+    downstream_dataset_config: ContrastiveSubjectDatasetConfig | None = None,
 ):
+    """
+    Creates dataloaders for the 5 major datasets as well as the downstream task dataset
+
+
+    """
     # We require that all dataset configs have the same window size. Enforce this now
     window_size_s = None
     for dataset_config in dataset_configs.values():
@@ -200,7 +206,8 @@ def get_dataloaders(
         "extrap_val": {},
         "extrap_test": {},
         "intra_val": {},
-        "intra_test": {}
+        "intra_test": {},
+        "downstream": {}
     }  # Maps from "train"... to the loaded datasets from each path
     for dataset_name, load_config in base_datasets.items():
         if len(load_config) == 2:
@@ -212,6 +219,16 @@ def get_dataloaders(
         dataset_subjects = get_subject_datasets_in_dir(dataset_path)
         if n_subjects is not None:
             dataset_subjects = dataset_subjects[:n_subjects]
+        n_subjects = len(dataset_subjects)
+
+        # Prepare for creating the downstream tasks dataset
+        if load_config.downstream_num_subjects > -1:
+            downstream_num_subjects = load_config.downstream_num_subjects
+        else:
+            downstream_num_subjects = n_subjects
+        assert downstream_num_subjects <= n_subjects, "The number of downstream subjects must be less than or equal to the number of subjects in the dataset"
+        downstream_subjects = dataset_subjects[:downstream_num_subjects]
+
         subject_datasets = load_subject_datasets(dataset_path, subjects=dataset_subjects)
         # Get the frequency of this dataset
         dataset_freq = list(subject_datasets[dataset_subjects[0]].root.values())[0].metadata.freq
@@ -220,6 +237,11 @@ def get_dataloaders(
         split_datasets = get_dataset_split(subject_datasets, split_config.train_prop, split_config.extrap_val_prop, split_config.extrap_test_prop, split_config.intra_val_prop, split_config.intra_test_prop, window_size_samples=window_size_samples)
         for dataset_type, dataset in split_datasets.items():
             datasets[dataset_type][dataset_name] = dataset
+
+        if downstream_num_subjects > 0:
+            # Then we also need to create the downstream dataset
+            downstream_subject_datasets = { subject: subject_datasets[subject] for subject in downstream_subjects }
+            datasets["downstream"][dataset_name] = downstream_subject_datasets
     # Now we have sets of datasets for each type. We need to concatenate them
     full_datasets = {}
     for dataset_type, dataset_dict in datasets.items():
@@ -232,6 +254,12 @@ def get_dataloaders(
         configs = dataset_configs[dataset_type]
         contrastive_dataset_config = configs[0]
         dataloader_config = configs[1]
+
+        if dataset_type != "train":
+            assert contrastive_dataset_config.sample_over_subjects_toggle == False, "Only the training set can sample over subjects. Otherwise the evaluation would be invalid."
+        if dataset_type == "downstream":
+            assert contrastive_dataset_config.max_samples_per_subject is not None, "The downstream dataset must have a limit set for the number of samples per subject"
+
 
         if len(subject_dataset) == 0:
             dataloaders[dataset_type] = None
@@ -470,7 +498,7 @@ if __name__ == "__main__":
         run_extrap_val=True,
         run_intra_val=True,
 
-        loss_temperature=0.1,
+        loss_temperature=0.2,
     )
 
     # model_config = ChambonExtendableConfig(C=num_channels, T=base_dataset_config.window_size_s*freq, k=63, m=2, num_blocks=9, D=512)

@@ -43,6 +43,7 @@ class ContrastiveSubjectDataset(Dataset):
         self.window_size_s = self.config.window_size_s
         self.window_stride_s = self.config.window_stride_s
 
+        self.max_samples_per_subject = config.max_samples_per_subject
         self.anchors = self.compute_anchors()
         self.subject_anchor_map = {}
         for anchor in self.anchors:
@@ -179,7 +180,8 @@ class ContrastiveSubjectDataset(Dataset):
                     # anchors.append((unique_subject_id, dataset_key, start_timestep))
                     if unique_subject_id not in unique_subject_anchors:
                         unique_subject_anchors[unique_subject_id] = []
-                    unique_subject_anchors[unique_subject_id].append((unique_subject_id, dataset_key, start_timestep))
+                    if self.max_samples_per_subject is None or len(unique_subject_anchors[unique_subject_id]) < self.max_samples_per_subject:
+                        unique_subject_anchors[unique_subject_id].append((unique_subject_id, dataset_key, start_timestep))
         
         # Then, if we are not re-sampling over subjects, we can just return the list of anchors concatenated
         if not self.config.sample_over_subjects_toggle:

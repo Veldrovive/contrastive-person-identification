@@ -26,6 +26,12 @@ class SupConLoss(nn.Module):
         labels = labels.contiguous().view(-1, 1)
         label_mask = torch.eq(labels, labels.T).float()
 
+        # TODO: Why are we not removing the diagonal from the label mask? Seems like we should do that.
+        # The positive set should not include the same embedding. I don't think that is a large problem, but it is definitely incorrect
+        # Let's add that as a test case
+        inverse_eye = torch.ones_like(label_mask) - torch.eye(mN, device=label_mask.device)
+        label_mask = label_mask * inverse_eye
+
         # Get the mask that we will use to compute the denominator
         denom_mask = torch.ones_like(label_mask) - torch.eye(mN, device=label_mask.device)
 
@@ -139,10 +145,10 @@ if __name__ == "__main__":
 
 
     features = torch.randn(600, 3)
-    labels = torch.randint(0, 10, (600,))
+    labels = torch.randint(0, 3, (600,))
     # Now we backprop these features. We expect the features to cluster by label
     features.requires_grad = True
-    loss = SupConLoss()
+    loss = SupConLoss(temperature=0.1)
 
     previous_features = torch.zeros_like(features)
 
@@ -151,11 +157,12 @@ if __name__ == "__main__":
     plt.ion()  # Turn on interactive mode
 
     count = 0
-    while torch.norm(previous_features - features) > 0.01:
+    while torch.norm(previous_features - features) > 0.001:
         previous_features = features.clone()
-        output = loss(features, labels)
+        normed_features = features / torch.norm(features, dim=1, keepdim=True)
+        output = loss(normed_features, labels)
         output.backward()
-        features.data -= 1 * features.grad
+        features.data -= 0.5 * features.grad
         features.grad.zero_()
         if count % 10 == 0:
             ax.clear()  # Clear the current figure

@@ -68,6 +68,7 @@ class ContrastiveSubjectDatasetConfig(BaseModel):
     window_stride_s: float = Field(..., description="The stride of the window to use for the sliding window")
 
     sample_over_subjects_toggle: bool = Field(False, description="If true, then each subject will have even representation over an epoch. If false, each subject will have representation proportional the number of samples they have")
+    max_samples_per_subject: int | None = Field(None, description="The maximum number of samples to use per subject. If None, then all samples will be used")
 
     positive_separate_session: bool = Field(True, description="Whether to only consider positive samples from the same session")
     error_on_no_separate_session: bool = Field(False, description="Error if there are no separate sessions for positive samples. If false, will default to using the same session")
@@ -86,6 +87,8 @@ class DatasetSplitConfig(BaseModel):
     extrap_test_prop: float = Field(0.05, description="The proportion of subjects to use for testing in the extrapolation set")
     intra_val_prop: float = Field(0.05, description="The proportion of subjects to use for validation in the intra set")
     intra_test_prop: float = Field(0.05, description="The proportion of subjects to use for testing in the intra set")
+
+    downstream_num_subjects: int = Field(-1, description="The number of subjects to use for the downstream task. If -1, then all subjects will be used")
 
     # Validate that the proportions add up to 1
     @model_validator(mode="after")
