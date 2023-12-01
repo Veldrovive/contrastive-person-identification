@@ -19,6 +19,7 @@ class ContrastiveSubjectDataset(Dataset):
         self,
         datasets: Dict[str, SubjectDataset],
         config: ContrastiveSubjectDatasetConfig,
+        subject_metadata: Dict[str, dict] = None,
         *args, **kwargs
     ):
         """
@@ -51,6 +52,11 @@ class ContrastiveSubjectDataset(Dataset):
             if unique_subject_id not in self.subject_anchor_map:
                 self.subject_anchor_map[unique_subject_id] = []
             self.subject_anchor_map[unique_subject_id].append(anchor)
+        self.subject_metadata = subject_metadata
+        # If subject_metadata is not none, then we need to make sure that for every subject in the dataset there is metadata
+        if subject_metadata is not None:
+            for unique_subject_id in self.unique_subjects:
+                assert unique_subject_id in subject_metadata and subject_metadata[unique_subject_id] is not None, f"Subject {unique_subject_id} is not in the subject metadata"
 
         self.get_sample_time = 0
         self.channel_process_sample_time = 0
@@ -343,6 +349,8 @@ class ContrastiveSubjectDataset(Dataset):
             'dataset_key': anchor_dataset_key,
             'start_timestep': anchor_start_timestep,
         }
+        if self.subject_metadata is not None:
+            anchor_metadata.update(self.subject_metadata[anchor_unique_subject_id])
 
         # We first select the positive samples
         positive_set = self.subject_anchor_map[anchor_unique_subject_id]
@@ -373,6 +381,8 @@ class ContrastiveSubjectDataset(Dataset):
                 'dataset_key': positive_dataset_key,
                 'start_timestep': positive_start_timestep,
             })
+            if self.subject_metadata is not None:
+                positive_metadata[-1].update(self.subject_metadata[positive_unique_subject_id])
         positive_window = positive_samples[0] if self.n_pos == 1 else positive_samples
         positive_metadata = positive_metadata[0] if self.n_pos == 1 else positive_metadata
 
@@ -397,6 +407,8 @@ class ContrastiveSubjectDataset(Dataset):
                 'dataset_key': negative_dataset_key,
                 'start_timestep': negative_start_timestep,
             })
+            if self.subject_metadata is not None:
+                negative_metadata[-1].update(self.subject_metadata[negative_unique_subject_id])
         negative_window = negative_samples[0] if self.n_neg == 1 else negative_samples
         negative_metadata = negative_metadata[0] if self.n_neg == 1 else negative_metadata
 

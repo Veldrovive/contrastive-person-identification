@@ -143,6 +143,9 @@ if __name__ == "__main__":
     raw_data_dir = Path(__file__).parent / "raw_data"
     output_dir = Path(__file__).parent / "datasets"
 
+    raw_data_dir.mkdir(parents=True, exist_ok=True)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
     figshare_url = "https://api.figshare.com/v2/collections/3917698/articles?page_size=80"
 
     download_figshare_collection(raw_data_dir, figshare_url)

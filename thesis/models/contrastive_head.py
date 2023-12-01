@@ -57,12 +57,31 @@ class ContrastiveHead(nn.Module):
             features = nn.functional.normalize(features, dim=1)
         return features
 
-def create_contrastive_module(embedding_module: nn.Module, head_config: ContrastiveHeadConfig):
+class ContrastiveModel(nn.Module):
     """
     Combines the embedding module and a contrastive head and returns the resulting model
     """
-    contrastive_head = ContrastiveHead(head_config)
-    return nn.Sequential(embedding_module, contrastive_head)
+    def __init__(self, embedding_module: nn.Module, head_config: ContrastiveHeadConfig):
+        super(ContrastiveModel, self).__init__()
+        self.embedding_module = embedding_module
+        self.contrastive_head = ContrastiveHead(head_config)
+
+    def forward(self, x, normalize=None):
+        # Input shape: (batch_size, logit_dimension)
+        # Output shape: (batch_size, c_loss_dimension)
+        features = self.embedding_module(x)
+        features = self.contrastive_head(features, normalize=normalize)
+        return features
+
+
+# def create_contrastive_module(embedding_module: nn.Module, head_config: ContrastiveHeadConfig):
+#     """
+#     Combines the embedding module and a contrastive head and returns the resulting model
+#     """
+#     contrastive_head = ContrastiveHead(head_config)
+#     # Create a model with the embedding module and the contrastive head as named modules
+#     # This allows us to split them for doing downstream tasks
+#     # return nn.Sequential(embedding_module, contrastive_head)
 
 
 if __name__ == "__main__":

@@ -23,8 +23,14 @@ class TrainingConfig(BaseModel):
     run_extrap_val: bool = Field(True, description="Whether to run the evaluation on the extrapolation validation set")
     run_intra_val: bool = Field(True, description="Whether to run the evaluation on the intra validation set")
 
+    # Downstream evaluation
+    run_downstream_eval: bool = Field(False, description="Whether to run the evaluation on the downstream evaluation set")
+    downstream_lda_metadata_keys: list[str] = Field([], description="The metadata keys to use for the LDA evaluation. \"unique_subject_id\" and \"dataset_key\" are always available. Other metadata is loaded from .json subject files.")
+    downstream_num_folds: int = Field(10, description="The number of folds to use for the downstream evaluation")
+
     # Loss function
     loss_temperature: float = Field(0.1, description="The temperature to use for the loss function")
+    same_session_suppression: float = Field(0.0, description="The amount to suppress the same session pairs in the loss function")
 
 class TrainingState(BaseModel):
     epoch: int = Field(0, description="The current epoch")

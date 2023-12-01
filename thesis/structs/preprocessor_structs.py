@@ -16,3 +16,8 @@ class MetaPreprocessorConfig(PreprocessorConfig):
     use_baseline_correction: bool = Field(..., description="Whether to use baseline correction")
     use_robust_scaler: bool = Field(..., description="Whether to use robust scaler from sklearn")
     use_clamping: bool = Field(..., description="Whether to use clamping")
+
+class LoadTimePreprocessorConfig(BaseModel):
+    target_sample_rate: int | None = Field(None, description="The target sample rate to downsample to. Errors if base sample rate < target sample rate")
+    band_pass_lower_cutoff: float | None = Field(None, description="The lower cutoff for the band pass filter")
+    band_pass_upper_cutoff: float | None = Field(None, description="The upper cutoff for the band pass filter")

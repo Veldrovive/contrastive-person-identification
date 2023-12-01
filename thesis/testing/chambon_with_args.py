@@ -22,6 +22,7 @@ from thesis.augmentation import SessionVarianceAugmentationConfig
 from thesis.structs.training_structs import TrainingConfig, TrainingState
 from thesis.structs.dataset_structs import DatasetSplitConfig, DataloaderConfig
 from thesis.loss_functions.sup_con import SupConLoss
+from thesis.loss_functions.weighted_sup_con import WeightedSupConLoss
 from thesis.evaluation.knn import get_embeddings, get_cross_session_knn_metrics, visualize_embeddings, visualize_confusion_matrix
 from thesis.evaluation.downstream import compute_LDA_metrics, get_embeddings as get_downstream_embeddings
 
@@ -91,14 +92,15 @@ def evaluate_model(training_state: TrainingState, training_config: TrainingConfi
     res = {}
 
     if training_config.run_intra_val:
-        # Run the intra evaluation
         intra_embeddings, intra_labels, intra_sessions = get_embeddings(training_config, model, intra_dataloader, limit=None)
         intra_cross_session_knn_metrics = get_cross_session_knn_metrics(
             intra_embeddings, intra_labels, intra_sessions,
             k=training_config.evaluation_k, metric='cosine'
         )
         res["intra_top_1_accuracy"] = intra_cross_session_knn_metrics["total_top_1_accuracy"]
+        res["intra_improved_top_1_accuracy"] = intra_cross_session_knn_metrics["improved_total_top_1_accuracy"]
         res[f"intra_top_{training_config.evaluation_k}_accuracy"] = intra_cross_session_knn_metrics["total_top_k_accuracy"]
+        res[f"intra_improved_top_{training_config.evaluation_k}_accuracy"] = intra_cross_session_knn_metrics["improved_total_top_k_accuracy"]
 
         session_embeddings = intra_cross_session_knn_metrics["session_embeddings"]
         intra_all_session_embeddings_visualization = visualize_embeddings(session_embeddings, title="UMAP Projection of Intra-Training Set Embeddings", separate_sessions=False)
@@ -145,7 +147,9 @@ def evaluate_model(training_state: TrainingState, training_config: TrainingConfi
             k=training_config.evaluation_k, metric='cosine'
         )
         res["extrap_top_1_accuracy"] = extrap_cross_session_knn_metrics["total_top_1_accuracy"]
+        res["extrap_improved_top_1_accuracy"] = extrap_cross_session_knn_metrics["improved_total_top_1_accuracy"]
         res[f"extrap_top_{training_config.evaluation_k}_accuracy"] = extrap_cross_session_knn_metrics["total_top_k_accuracy"]
+        res[f"extrap_improved_top_{training_config.evaluation_k}_accuracy"] = extrap_cross_session_knn_metrics["improved_total_top_k_accuracy"]
 
         session_embeddings = extrap_cross_session_knn_metrics["session_embeddings"]
         extrap_all_session_embeddings_visualization = visualize_embeddings(session_embeddings, title="UMAP Projection of Extrapolation Set Embeddings", separate_sessions=False)
@@ -348,7 +352,8 @@ def train(training_state: TrainingState, training_config: TrainingConfig, model,
     print(f"Training model with {num_params} parameters")
 
     unique_subject_id_to_label = { id: i for i, id in enumerate(dataloaders['train'].dataset.unique_subjects) }
-    loss_func = SupConLoss(temperature=training_config.loss_temperature)
+    # loss_func = SupConLoss(temperature=training_config.loss_temperature)
+    loss_func = WeightedSupConLoss(temperature=training_config.loss_temperature)
 
     if training_config.evaluate_first:
         # Run an initial evaluation
@@ -367,31 +372,49 @@ def train(training_state: TrainingState, training_config: TrainingConfig, model,
             batch = next(iterator)
             optimizer.zero_grad()
             anchors = batch["anchor"]
-            anchor_labels = torch.tensor([unique_subject_id_to_label[data['unique_subject_id']] for data in batch["anchor_metadata"]])
+            anchor_subject_labels = torch.tensor([unique_subject_id_to_label[data['unique_subject_id']] for data in batch["anchor_metadata"]])
+            anchor_session_hashes = torch.tensor([hash(data['dataset_key'][1]) for data in batch["anchor_metadata"]])
             positives = batch["positive"]
-            if positives.ndim == 4:
-                # The positive labels are just the anchor labels replicated across a new axis 1, n_pos times
-                positive_labels = anchor_labels.unsqueeze(1).repeat(1, positives.shape[1])
+            if positives.ndim == 4:  # If there is more than one positive sample per anchor
+                # The positive labels are the anchor labels replicated across a new axis 1, n_pos times
+                positive_subject_labels = anchor_subject_labels.unsqueeze(1).repeat(1, positives.shape[1])
                 positives = positives.reshape(-1, positives.shape[-2], positives.shape[-1])
-                positive_labels = positive_labels.reshape(-1)
-            else:
-                # The the positive labels are just the anchor labels
-                positive_labels = anchor_labels
+                positive_subject_labels = positive_labels.reshape(-1)
+
+                # The session are different between the anchors and positives, so we need to compute them separately
+                positive_session_hashes = torch.tensor([hash(data['dataset_key'][1]) for data in batch["positive_metadata"]] * positives.shape[1])
+                positives = positives.reshape(-1, positives.shape[-2], positives.shape[-1])
+                positive_session_hashes = positive_session_hashes.reshape(-1)
+            else:  # If there is only one positive sample per anchor
+                # The the positive subject ids are just the anchor labels
+                positive_subject_labels = anchor_subject_labels
+
+                # Again, we need to compute the session hashes separately
+                positive_session_hashes = torch.tensor([hash(data['dataset_key'][1]) for data in batch["positive_metadata"]])
             
             # Now we can create the full batch by concatenating the anchors and positives
             batch_windows = torch.cat([anchors, positives], dim=0)
-            batch_labels = torch.cat([anchor_labels, positive_labels], dim=0)
+            batch_subject_labels = torch.cat([anchor_subject_labels, positive_subject_labels], dim=0)
+            # The session labels are more complicated. Each label is [subject_label, session_hash] so we need to produce an nx2 tensor
+            batch_session_hashes = torch.cat([anchor_session_hashes, positive_session_hashes], dim=0)
+            batch_session_labels = torch.stack([batch_subject_labels, batch_session_hashes], dim=1)
             # Convert all samples to float
             batch_windows = batch_windows.float()
-            batch_labels = batch_labels.float()
+            batch_subject_labels = batch_subject_labels.float()
+            batch_session_labels = batch_session_labels.float()
             # Move the samples to the device
             batch_windows = batch_windows.to(training_config.device)
-            batch_labels = batch_labels.to(training_config.device)
+            batch_subject_labels = batch_subject_labels.to(training_config.device)
+            batch_session_labels = batch_session_labels.to(training_config.device)
 
             embeddings = model(batch_windows)
             # Normalize the embeddings for the loss function
             embeddings = torch.nn.functional.normalize(embeddings, dim=1)
-            loss = loss_func(embeddings, batch_labels)
+            # loss = loss_func(embeddings, batch_subject_labels)
+            loss = loss_func(embeddings, [
+                (1.0, batch_subject_labels),  # Baseline positive weight for same-subject samples
+                (-training_config.same_session_suppression, batch_session_labels)  # Reduce the weight on same-session samples to promote cross-session invariance
+            ])
             loss.backward()
             # torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             optimizer.step()
@@ -405,12 +428,60 @@ def train(training_state: TrainingState, training_config: TrainingConfig, model,
         eval_res = evaluate_model(training_state, training_config, model, dataloaders)
         wandb.log(eval_res, step=training_state.step)
 
+def get_channel_whitelist(whitelist_str: str) -> list[str]:
+    """
+    Parses a comma separated string of channel names into a list of channel names
+    """
+    return [channel.strip() for channel in whitelist_str.split(",")]
+
 if __name__ == "__main__":
+    import argparse
+    args = argparse.ArgumentParser()
+    # Do we evaluate before training?
+    args.add_argument("--evaluate_first", action="store_true")
+    # Which evaluations do we run?
+    args.add_argument("--run_intra_val", action="store_true")
+    args.add_argument("--run_extrap_val", action="store_true")
+    args.add_argument("--run_downstream_eval", action="store_true")
+    # How many epochs do we train for? How many iterations per epoch? What train batch size?
+    args.add_argument("--epochs", type=int, default=20)
+    args.add_argument("--epoch_length", type=int, default=1024)
+    args.add_argument("--train_batch_size", type=int, default=64)
+    # What loss temperature do we use?
+    args.add_argument("--loss_temperature", type=float, default=0.05)
+    args.add_argument("--same_session_suppression", type=float, default=0.0)
+    # Load time preprocessing config
+    args.add_argument("--sample_rate", type=int, default=120)
+    args.add_argument("--low_freq_cutoff", type=float, default=None)
+    args.add_argument("--high_freq_cutoff", type=float, default=None)
+    # Channel whitelist
+    args.add_argument("--channel_whitelist", type=str, default="C3,C4,Cz,F3,F4,F7,F8,Fp1,Fp2,Fz,O1,O2,P3,P4,P7,P8,Pz,T7,T8")
+    # What window size do we use?
+    args.add_argument("--window_size_s", type=float, default=8)
+    # Which checkpoint and should we load it?
+    args.add_argument("--checkpoint_load_path", type=str, default=None)
+    args.add_argument("--load_checkpoint", action="store_true")
+    # Go online? What project?
+    args.add_argument("--wandb_online", action="store_true")
+    args.add_argument("--wandb_project", type=str, default="thesis")
+    args.add_argument("--wandb_run_name", type=str, default=None)
+    # And testing parameters
+    args.add_argument("--hack", action="store_true")
+
+    # Parse the arguments
+    args = args.parse_args()
+
+    if args.channel_whitelist is not None:
+        channel_whitelist = get_channel_whitelist(args.channel_whitelist)
+    else:
+        channel_whitelist = None
+
+
     training_state = TrainingState()
-    wandb.init(project="thesis-filter-tests", mode="online")
+    wandb.init(project=args.wandb_project, mode="online" if args.wandb_online else "offline", name=args.wandb_run_name)
     training_state.run_id = wandb.run.id
 
-    base_path = Path(__file__).parent / f"experiments/chambon_sup_con/kaya/{training_state.run_id}"
+    base_path = Path(__file__).parent / f"experiments/chambon/{training_state.run_id}"
     checkpoints_path = base_path / "checkpoints"
     checkpoints_path.mkdir(parents=True, exist_ok=True)
     visuals_path = base_path / "visuals"
@@ -419,7 +490,7 @@ if __name__ == "__main__":
     braindecode_dataset_base_path = Path(__file__).parent.parent / 'datasets' / 'braindecode' / 'datasets_data'
     kaya_dataset_path = Path(__file__).parent.parent / 'datasets' / 'large_eeg' / 'datasets_data'
     # Update: Now using a consistent extrap set for all experiments. This also forces a consistent intra set, but the exact split in each run is not consistent
-    raw_datasets = {
+    v1_raw_datasets = {
         'physionet': (braindecode_dataset_base_path / 'physionet', DatasetSplitConfig(train_prop=1, extrap_val_prop=0.0, extrap_test_prop=0, intra_val_prop=0.0, intra_test_prop=0, downstream_num_subjects=0)),  # only has one session so invalid for evaluation
         'lee2019_train': (braindecode_dataset_base_path / 'lee2019_filtered_train_intra_set', DatasetSplitConfig(train_prop=0.9, extrap_val_prop=0, extrap_test_prop=0, intra_val_prop=0.1, intra_test_prop=0)),
         # 'lee2019_train_intra_only': (braindecode_dataset_base_path / 'lee2019_filtered_train_intra_set', DatasetSplitConfig(train_prop=0, extrap_val_prop=0, extrap_test_prop=0, intra_val_prop=1, intra_test_prop=0), 6),
@@ -428,13 +499,31 @@ if __name__ == "__main__":
         # 'kaya_train_intra_only': (kaya_dataset_path / 'filtered_train_intra_set', DatasetSplitConfig(train_prop=0, extrap_val_prop=0, extrap_test_prop=0, intra_val_prop=1, intra_test_prop=0), 2),
         'kaya_extrap': (kaya_dataset_path / 'filtered_extrap_set', DatasetSplitConfig(train_prop=0, extrap_val_prop=1, extrap_test_prop=0, intra_val_prop=0, intra_test_prop=0, downstream_num_subjects=0))
     }
-    # raw_datasets = {
-    #     # 'physionet': (braindecode_dataset_base_path / 'physionet', DatasetSplitConfig(train_prop=1, extrap_val_prop=0.0, extrap_test_prop=0, intra_val_prop=0.0, intra_test_prop=0, downstream_num_subjects=0), 10),  # only has one session so invalid for evaluation
-    #     'lee2019_train': (braindecode_dataset_base_path / 'lee2019_filtered_train_intra_set', DatasetSplitConfig(train_prop=0.8, extrap_val_prop=0.1, extrap_test_prop=0, intra_val_prop=0.1, intra_test_prop=0), 10),
-    # }
+    v1_raw_hacking_datasets = {
+        # 'physionet': (braindecode_dataset_base_path / 'physionet', DatasetSplitConfig(train_prop=1, extrap_val_prop=0.0, extrap_test_prop=0, intra_val_prop=0.0, intra_test_prop=0, downstream_num_subjects=0), 10),  # only has one session so invalid for evaluation
+        'lee2019_train': (braindecode_dataset_base_path / 'lee2019_filtered_train_intra_set', DatasetSplitConfig(train_prop=0.8, extrap_val_prop=0.1, extrap_test_prop=0, intra_val_prop=0.1, intra_test_prop=0), 10),
+    }
+
+    v2_braindecode_dataset_base_path = Path(__file__).parent.parent / 'datasets' / 'braindecode' / 'datasets_data_v2'
+    v2_kaya_dataset_path = Path(__file__).parent.parent / 'datasets' / 'large_eeg' / 'datasets_data' / 'kaya_v2'
+
+    v2_raw_datasets = {
+        'physionet': (v2_braindecode_dataset_base_path / 'physionet_160', DatasetSplitConfig(train_prop=1, extrap_val_prop=0.0, extrap_test_prop=0, intra_val_prop=0.0, intra_test_prop=0, downstream_num_subjects=0)),  # only has one session so invalid for evaluation
+        'lee2019_train': (v2_braindecode_dataset_base_path / 'lee2019_512_highpass_filtered' / 'train_intra_set', DatasetSplitConfig(train_prop=0.9, extrap_val_prop=0, extrap_test_prop=0, intra_val_prop=0.1, intra_test_prop=0)),
+        'lee2019_extrap': (v2_braindecode_dataset_base_path / 'lee2019_512_highpass_filtered' / 'extrap_set', DatasetSplitConfig(train_prop=0, extrap_val_prop=1, extrap_test_prop=0, intra_val_prop=0, intra_test_prop=0)),
+        'kaya_train': (v2_kaya_dataset_path / 'train_intra_set', DatasetSplitConfig(train_prop=0.95, extrap_val_prop=0, extrap_test_prop=0, intra_val_prop=0.05, intra_test_prop=0, downstream_num_subjects=0)),
+        'kaya_extrap': (v2_kaya_dataset_path / 'extrap_set', DatasetSplitConfig(train_prop=0, extrap_val_prop=1, extrap_test_prop=0, intra_val_prop=0, intra_test_prop=0, downstream_num_subjects=0))
+    }
+
+    v2_raw_hacking_datasets = {
+        # 'physionet': (v2_braindecode_dataset_base_path / 'physionet_160', DatasetSplitConfig(train_prop=1, extrap_val_prop=0.0, extrap_test_prop=0, intra_val_prop=0.0, intra_test_prop=0, downstream_num_subjects=0), 10),  # only has one session so invalid for evaluation
+        'lee2019_train': (v2_braindecode_dataset_base_path / 'lee2019_512_highpass_filtered' / 'train_intra_set', DatasetSplitConfig(train_prop=0.8, extrap_val_prop=0.1, extrap_test_prop=0, intra_val_prop=0.1, intra_test_prop=0), 3),
+    }
+
+    raw_datasets = v2_raw_hacking_datasets if args.hack else v2_raw_datasets
 
     preprocess_config = MetaPreprocessorConfig(
-        sample_rate=120,
+        sample_rate=args.sample_rate,
         clamping_sd=5,
         target_sample_rate=None,
         use_baseline_correction=True,
@@ -456,13 +545,13 @@ if __name__ == "__main__":
     )
 
     load_time_preprocess_config = LoadTimePreprocessorConfig(
-        target_sample_rate=None,
-        band_pass_lower_cutoff=12,
-        band_pass_upper_cutoff=None
+        target_sample_rate=args.sample_rate,
+        band_pass_lower_cutoff=args.low_freq_cutoff,
+        band_pass_upper_cutoff=args.high_freq_cutoff,
     )
 
     train_dataloader_config = DataloaderConfig(
-        batch_size = 64,
+        batch_size = args.train_batch_size,
         shuffle = True,
     )
     eval_dataloader_config = DataloaderConfig(
@@ -470,9 +559,10 @@ if __name__ == "__main__":
         shuffle = False,
     )
     base_dataset_config = ContrastiveSubjectDatasetConfig(
-        target_channels=['C3', 'C4', 'Cz', 'F3', 'F4', 'F7', 'F8', 'Fp1', 'Fp2', 'Fz', 'O1', 'O2', 'P3', 'P4', 'P7', 'P8', 'Pz', 'T7', 'T8'],
+        # target_channels=['C3', 'C4', 'Cz', 'F3', 'F4', 'F7', 'F8', 'Fp1', 'Fp2', 'Fz', 'O1', 'O2', 'P3', 'P4', 'P7', 'P8', 'Pz', 'T7', 'T8'],
+        target_channels=channel_whitelist,
         toggle_direct_sum_on=False,
-        window_size_s=8,
+        window_size_s=args.window_size_s,
         window_stride_s=2,
         sample_over_subjects_toggle=True,
         positive_separate_session=True,
@@ -526,20 +616,21 @@ if __name__ == "__main__":
         device="mps",
         checkpoint_path=checkpoints_path,
         evaluation_visualization_path=visuals_path,
-        load_checkpoint=False,
-        checkpoint_load_path=Path("/Users/aidan/projects/engsci/year4/thesis/implementation/thesis/testing/experiments/chambon_sup_con/kaya/gl0yor99/checkpoints/checkpoint_5.pth"),
-        evaluate_first=True,
-        epochs=100,
-        epoch_length=512*4,
+        load_checkpoint=args.load_checkpoint,
+        checkpoint_load_path=args.checkpoint_load_path,
+        evaluate_first=args.evaluate_first,
+        epochs=args.epochs,
+        epoch_length=args.epoch_length,
         evaluation_k=5,
 
-        run_extrap_val=True,
-        run_intra_val=True,
+        run_extrap_val=args.run_extrap_val,
+        run_intra_val=args.run_intra_val,
 
-        run_downstream_eval=True,
+        run_downstream_eval=args.run_downstream_eval,
         downstream_lda_metadata_keys=["sex"],
 
-        loss_temperature=0.05,
+        loss_temperature=args.loss_temperature,
+        same_session_suppression=args.same_session_suppression,
     )
 
     # model_config = ChambonExtendableConfig(C=num_channels, T=base_dataset_config.window_size_s*freq, k=63, m=2, num_blocks=9, D=512)
@@ -554,6 +645,7 @@ if __name__ == "__main__":
         load_checkpoint(training_state, training_config, model, optimizer)
 
     all_configs = {
+        'args': vars(args),
         'train_dataset_config': train_dataset_config,
         'eval_dataset_config': eval_dataset_config,
         'train_dataloader_config': train_dataloader_config,

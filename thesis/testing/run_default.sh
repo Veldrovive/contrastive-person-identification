@@ -1,0 +1,14 @@
+python chambon_with_args.py \
+    --evaluate_first \
+    --run_intra_val \
+    --run_extrap_val \
+    --run_downstream_eval \
+    --epochs 10 \
+    --epoch_length 1024 \
+    --train_batch_size 64 \
+    --loss_temperature 0.05 \
+    --window_size_s 8 \
+    --wandb_project "thesis-default" \
+    --wandb_run_name "New Loss Test (Should be no different)" \
+    --sample_rate 120 \
+    --wandb_online \

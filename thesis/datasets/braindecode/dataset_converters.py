@@ -7,6 +7,7 @@ import os
 import shutil
 from thesis.datasets.braindecode.create_subject_dataset import BraindecodeDatasetName, construct_braindecode_dataset
 from thesis.datasets.subject_dataset import SubjectDataset, SubjectID, save_subject_datasets, merge_datasets
+from mne import get_config, set_config
 
 def convert_dataset(
     save_dir: str | Path,
@@ -116,8 +117,13 @@ def construct_shin_datasets(save_dir_parent: str | Path, subject_ids: list[Subje
 if __name__ == "__main__":
     save_path = Path(__file__).parent / 'test_datasets'
 
-    # construct_physionet_dataset(save_path, list(range(1, 109+1)), target_freq=120, delete_after=False)
-    construct_lee2019_dataset(save_path, list(range(32, 51+1)), target_freq=512, delete_after=False)
-    # construct_shin_datasets(save_path, list(range(1, 29+1)), target_freq=120, delete_after=False)
+    external_data_path = Path("/Volumes/LIFE_DISK/ThesisDataBackup/mne_data").absolute().as_posix()
+
+    # print(get_config("MNE_DATA"))
+    set_config("MNE_DATA", external_data_path)
+
+    # construct_physionet_dataset(save_path, list(range(1, 109+1)), target_freq=160, delete_after=False)
+    # construct_lee2019_dataset(save_path, list(range(1, 51+1)), target_freq=512, delete_after=False)
+    # construct_shin_datasets(save_path, list(range(1, 29+1)), target_freq=200, delete_after=False)
 
     # construct_filtered_lee2019_dataset(save_path, list(range(1, 2+1)), target_freq=120, delete_after=False)

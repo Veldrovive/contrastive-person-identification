@@ -48,7 +48,60 @@ def get_embeddings(training_config: TrainingConfig, model, dataloader, limit=Non
 
     return embeddings, labels, sessions
 
-def get_cross_session_knn_metrics(embeddings: list[np.ndarray], labels: list[str], sessions: list[str], k: int = 2, metric: str = 'euclidean'):
+def get_representative_embedding(embeddings: np.ndarray, z_score_threshold: float = 1.5):
+    """
+    Computes a more reliable embedding out of a set of samples from the distribution of embeddings for a single subject
+    
+    We take an array of shape (n, m) where there are n samples of m-dimensional embeddings
+    We compute the cosine similarity between each embedding and take the average
+    Embeddings with a Z-score above the threshold are considered outliers and are removed
+    The remaining embeddings are averaged to get the representative embedding
+
+    This has the flaw that if the distribution of embeddings is not unimodal we could get a bad representative embedding
+    We could fix this by using a more advanced clustering technique to detect outliers, but for a first test this should be fine
+    """
+    # Normalize the embeddings
+    embeddings = embeddings / np.linalg.norm(embeddings, axis=1, keepdims=True)
+
+    # Calculate pairwise cosine similarity since embeddings are normalized
+    cosine_similarity = embeddings @ embeddings.T
+    avg_similarity = np.mean(cosine_similarity, axis=1)
+
+    z_scores = (avg_similarity - np.mean(avg_similarity)) / np.std(avg_similarity)
+    outliers = np.abs(z_scores) > z_score_threshold
+
+    # Filter out the outliers
+    filtered_embeddings = embeddings[~outliers]
+
+    # Compute the average of the remaining embeddings
+    representative_embedding = np.mean(filtered_embeddings, axis=0)
+
+    # Normalize the representative embedding
+    representative_embedding = representative_embedding / np.linalg.norm(representative_embedding)
+
+    return representative_embedding
+
+def select_random_subsets(embeddings, subset_size):
+    """
+    Select random subsets of embeddings with no overlap, adjusting for divisibility.
+    There is no overlap between subsets.
+    """
+    n, m = embeddings.shape
+    
+    # Adjust n to make it divisible by subset_size
+    n_adj = n - (n % subset_size)
+    adjusted_embeddings = embeddings[:n_adj]
+
+    # Shuffle the adjusted embeddings
+    np.random.shuffle(adjusted_embeddings)
+
+    # Split the array into subsets
+    num_subsets = n_adj // subset_size
+    subsets = np.array(np.array_split(adjusted_embeddings, num_subsets))
+
+    return subsets
+
+def get_cross_session_knn_metrics(embeddings: list[np.ndarray], labels: list[str], sessions: list[str], k: int = 2, metric: str = 'cosine'):
     """
     Computes the knn metrics for the given embedding label pairs, but exclude neighbors from the same session
     """
@@ -95,6 +148,41 @@ def get_cross_session_knn_metrics(embeddings: list[np.ndarray], labels: list[str
     label_predictions = [sorted(predictions, key=lambda x: x[0])[:k] for predictions in label_predictions]
     # NOTE: We don't have any problems with the first neighbor being the same as the anchor because we exclude neighbors from the same session
 
+    # We also compute metrics for representative embeddings. For now we choose subset sizes of 10.
+    improved_embeddings = []
+    improved_labels_gt = []
+    improved_sessions_gt = []
+    for (label, session), subject_session_embeddings in session_embeddings.items():
+        # Split the session embeddings into subsets
+        subsets = select_random_subsets(np.array(subject_session_embeddings), 10)
+        
+        improved_embeddings.extend([get_representative_embedding(subset) for subset in subsets])
+        improved_labels_gt.extend([label for _ in subsets])
+        improved_sessions_gt.extend([session for _ in subsets])
+
+    # We still use the original models to predict the neighbors
+    improved_session_predictions = {}  # Maps from (label, session) to the output of the model run over all embeddings
+    for (label, session), subject_session_embeddings in session_embeddings.items():
+        improved_session_predictions[(label, session)] = session_models[(label, session)].kneighbors(improved_embeddings, return_distance=True)
+
+    # Predict the labels for each embedding over all session models
+    improved_label_predictions = []  # Each element is a list of tuples (distance, label, session) for the corresponding embedding
+    for embedding_index, (embedding, label, session) in enumerate(zip(improved_embeddings, improved_labels_gt, improved_sessions_gt)):
+        embedding_predictions = []
+        for session_key, subject_session_predictions in improved_session_predictions.items():
+            if session_key == (label, session):
+                continue
+            # Otherwise we add the predictions from this session to the list
+            for distance, neighbor_index in zip(subject_session_predictions[0][embedding_index], subject_session_predictions[1][embedding_index]):
+                neighbor_label = session_key[0]
+                neighbor_session = session_key[1]
+                embedding_predictions.append((distance, neighbor_label, neighbor_session))
+        improved_label_predictions.append(embedding_predictions)
+
+    # Now for each embedding, we sort the predictions by distance and take the top k
+    improved_label_predictions = [sorted(predictions, key=lambda x: x[0])[:k] for predictions in improved_label_predictions]
+
+    # Compute metrics
     top_1_count_map = {}  # Maps from label to the number of times the top 1 neighbor is from the same subject
     top_k_count_map = {}  # Maps from label to the number of times the correct label appears in the top k neighbors
     total_count_map = {}  # Maps from label to the total number of times the label was seen
@@ -137,6 +225,50 @@ def get_cross_session_knn_metrics(embeddings: list[np.ndarray], labels: list[str
     total_top_1_accuracy = sum(top_1_count_map.values()) / sum(total_count_map.values())
     total_top_k_accuracy = sum(top_k_count_map.values()) / sum(total_count_map.values())
 
+    
+    # And then again for the improved set
+    improved_top_1_count_map = {}  # Maps from label to the number of times the top 1 neighbor is from the same subject
+    improved_top_k_count_map = {}  # Maps from label to the number of times the correct label appears in the top k neighbors
+    improved_total_count_map = {}  # Maps from label to the total number of times the label was seen
+
+    improved_top_1_labels = []  # The same order as embeddings. The predicted label for each embedding
+    improved_consensus_k_labels = []  # The same order as embeddings. The predicted label for each embedding given by the consensus of the top k neighbors
+
+    for embedding, true_label, true_session, label_prediction in zip(improved_embeddings, improved_labels_gt, improved_sessions_gt, improved_label_predictions):
+        # Get the top 1 label
+        top_1_label = label_prediction[0][1]
+        improved_top_1_labels.append(top_1_label)
+        if true_label not in improved_top_1_count_map:
+            improved_top_1_count_map[true_label] = 0
+        if top_1_label == true_label:
+            improved_top_1_count_map[true_label] += 1
+
+        # Get the top k label
+        top_k_labels = [label for _, label, _ in label_prediction]
+        consensus_k_label = max(set(top_k_labels), key=top_k_labels.count)
+        improved_consensus_k_labels.append(consensus_k_label)
+        
+        if true_label not in improved_top_k_count_map:
+            improved_top_k_count_map[true_label] = 0
+        if true_label in top_k_labels:
+            improved_top_k_count_map[true_label] += 1
+
+        # Update the total count map
+        if true_label not in improved_total_count_map:
+            improved_total_count_map[true_label] = 0
+        improved_total_count_map[true_label] += 1
+
+    # Compute the accuracy for each label
+    improved_top_1_accuracies = {}
+    improved_top_k_accuracies = {}
+    for label in improved_total_count_map.keys():
+        improved_top_1_accuracies[label] = improved_top_1_count_map[label] / improved_total_count_map[label]
+        improved_top_k_accuracies[label] = improved_top_k_count_map[label] / improved_total_count_map[label]
+
+    # Compute the total accuracy
+    improved_total_top_1_accuracy = sum(improved_top_1_count_map.values()) / sum(improved_total_count_map.values())
+    improved_total_top_k_accuracy = sum(improved_top_k_count_map.values()) / sum(improved_total_count_map.values())
+
     res = {
         # Used for visualization of embeddings
         'session_embeddings': session_embeddings,
@@ -146,6 +278,12 @@ def get_cross_session_knn_metrics(embeddings: list[np.ndarray], labels: list[str
         'top_k_accuracies': top_k_accuracies,
         'total_top_1_accuracy': total_top_1_accuracy,
         'total_top_k_accuracy': total_top_k_accuracy,
+
+        # Improved metrics
+        'improved_top_1_accuracies': improved_top_1_accuracies,
+        'improved_top_k_accuracies': improved_top_k_accuracies,
+        'improved_total_top_1_accuracy': improved_total_top_1_accuracy,
+        'improved_total_top_k_accuracy': improved_total_top_k_accuracy,
 
         # Used for confusion matrix
         'true_labels': labels,

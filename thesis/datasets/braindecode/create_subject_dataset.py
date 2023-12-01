@@ -90,6 +90,8 @@ def construct_braindecode_dataset(dataset_name: BraindecodeDatasetName, subject_
 if __name__ == "__main__":
     from thesis.datasets.subject_dataset import save_subject_dataset, save_subject_datasets, load_subject_dataset, load_subject_datasets
     from pathlib import Path
+
+    
     test_dataset = construct_braindecode_dataset('PhysionetMI', list(range(1, 2+1)), target_freq=120, load_subjects_independently=True)
     subject_0_dataset = test_dataset['1']
 

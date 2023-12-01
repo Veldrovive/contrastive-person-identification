@@ -4,11 +4,15 @@ Defines the types and utilities for the subject dataset
 
 import os
 import time
+import json
 import numpy as np
 import torch
 from pathlib import Path
 from pydantic import BaseModel, RootModel, Field, validator, ValidationError
 from typing import TypedDict, Dict, Tuple, List
+
+from .mne_base import convert_dataset_to_nme, convert_dataset_to_subject
+from thesis.structs.preprocessor_structs import LoadTimePreprocessorConfig
 
 SubjectID = str
 SessionID = str
@@ -72,6 +76,18 @@ def concatenate_datasets(datasets: Dict[str, Dict[str, SubjectDataset]]) -> Dict
             new_subject_id = f"{subject_id}_{dataset_name}"
             concatenated_datasets[new_subject_id] = subject_dataset
     return concatenated_datasets
+
+def concatenate_metadata(metadata: Dict[str, Dict[str, dict | None]]) -> Dict[str, dict | None]:
+    """
+    Intended to be used to combine metadata loaded from load_subject_metadata
+    So we expect conflicting subject ids that are resolved by appending the dataset key
+    """
+    concatenated_metadata = {}
+    for dataset_name, subjects_metadata in metadata.items():
+        for subject_id, subject_metadata in subjects_metadata.items():
+            new_subject_id = f"{subject_id}_{dataset_name}"
+            concatenated_metadata[new_subject_id] = subject_metadata
+    return concatenated_metadata
 
 def split_dataset_by_subject(dataset: SubjectDataset) -> Dict[SubjectID, SubjectDataset]:
     """
@@ -252,14 +268,35 @@ def save_subject_datasets(datasets: Dict[str, SubjectDataset], dir: str | Path):
     for dataset_key, dataset in datasets.items():
         save_subject_dataset(dataset, os.path.join(dir, f"{dataset_key}.pt"))
 
-def load_subject_dataset(path: str | Path) -> SubjectDataset:
+def load_subject_dataset(path: str | Path, load_time_preprocessor_config: LoadTimePreprocessorConfig = None) -> SubjectDataset:
     """
     Loads the dataset from the given path
     """
     if isinstance(path, Path):
         path = path.absolute().as_posix()
-    dataset_dict = torch.load(path)
-    return validate_dataset(dataset_dict)
+    try:
+        dataset_dict = torch.load(path)
+    except RuntimeError as e:
+        print(f"Error loading dataset from {path}")
+        raise e
+    dataset = validate_dataset(dataset_dict)
+    if load_time_preprocessor_config is not None:
+        mne_datasets = convert_dataset_to_nme(dataset)
+        if load_time_preprocessor_config.target_sample_rate is not None:
+            # Then we check if the sample rate is different
+            new_sample_rate = load_time_preprocessor_config.target_sample_rate
+            for subject, mne_dataset in mne_datasets.items():
+                assert mne_dataset["data"].info["sfreq"] >= new_sample_rate, f"Cannot upsample data. Current sample rate: {mne_dataset.info['sfreq']}, target sample rate: {new_sample_rate}"
+                if mne_dataset["data"].info["sfreq"] != new_sample_rate:
+                    mne_dataset["data"].resample(load_time_preprocessor_config.target_sample_rate)
+        
+        lower_cutoff = load_time_preprocessor_config.band_pass_lower_cutoff
+        upper_cutoff = load_time_preprocessor_config.band_pass_upper_cutoff
+        if lower_cutoff is not None or upper_cutoff is not None:
+            for subject, mne_dataset in mne_datasets.items():
+                mne_dataset["data"].filter(l_freq=lower_cutoff, h_freq=upper_cutoff)
+        dataset = validate_dataset(convert_dataset_to_subject(mne_datasets))
+    return dataset
 
 def get_subject_datasets_in_dir(dir: str | Path) -> list[str]:
     """
@@ -274,7 +311,7 @@ def get_subject_datasets_in_dir(dir: str | Path) -> list[str]:
             dataset_keys.append(dataset_key)
     return dataset_keys
 
-def load_subject_datasets(dir: str, max_subjects: int | None = None, subjects: list[str] | None = None) -> Dict[str, SubjectDataset]:
+def load_subject_datasets(dir: str, max_subjects: int | None = None, subjects: list[str] | None = None, load_time_preprocessor_config: LoadTimePreprocessorConfig = None) -> Dict[str, SubjectDataset]:
     """
     Loads a list of datasets from the given directory
 
@@ -286,9 +323,26 @@ def load_subject_datasets(dir: str, max_subjects: int | None = None, subjects: l
         if file.endswith(".pt"):
             dataset_key = file[:-3]
             if subjects is None or dataset_key in subjects:
-                datasets[dataset_key] = load_subject_dataset(os.path.join(dir, file))
+                datasets[dataset_key] = load_subject_dataset(os.path.join(dir, file), load_time_preprocessor_config)
         if max_subjects is not None and len(datasets) >= max_subjects:
             break
     end_time = time.time()
     print(f"Loaded {len(datasets)} datasets in {round(end_time - start_time, 2)} seconds")
     return datasets
+
+def load_subject_metadata(dir: str, subjects: list[str]) -> Dict[str, dict | None]:
+    """
+    Loads the metadata files for the given subjects.
+    Expects files to be {dataset_key}.json
+
+    if the metadata file does not exist, then the value will be None
+    """
+    metadata = {}
+    for subject in subjects:
+        metadata_path = os.path.join(dir, f"{subject}.json")
+        if os.path.exists(metadata_path):
+            with open(metadata_path, "r") as f:
+                metadata[subject] = json.load(f)
+        else:
+            metadata[subject] = None
+    return metadata

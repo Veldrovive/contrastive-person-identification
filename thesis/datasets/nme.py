@@ -6,30 +6,9 @@ from pathlib import Path
 import mne
 from matplotlib import pyplot as plt
 
-from thesis.datasets.subject_dataset import SubjectDataset, load_subject_datasets, load_subject_dataset, ElementDict, SubjectDatasetKey, get_subject_datasets_in_dir, validate_dataset, save_subject_dataset
-
-def convert_dataset_to_nme(dataset: SubjectDataset):
-    """
-    Returns a dict with the same structure as a subject dataset, but where data is an nme object instead of a numpy array
-    """
-    dataset = dataset.model_dump()
-    for dataset_key, elem in dataset.items():
-        channels = elem['metadata']['channels']
-        freq = elem['metadata']['freq']
-        ch_types = ['eeg' for _ in channels]
-        info = mne.create_info(ch_names=channels, sfreq=freq, ch_types=ch_types)
-        raw = mne.io.RawArray(elem['data'], info)
-        elem['data'] = raw
-    return dataset
-
-def convert_dataset_to_subject(dataset: dict) -> SubjectDataset:
-    """
-    Converts from mne back to a subject dataset
-    """
-    for dataset_key, elem in dataset.items():
-        elem['data'] = elem['data'].get_data()
-    return validate_dataset(dataset)
-
+from thesis.datasets.subject_dataset import SubjectDataset, load_subject_datasets, load_subject_dataset, ElementDict, SubjectDatasetKey, get_subject_datasets_in_dir, validate_dataset, save_subject_dataset, load_subject_datasets, save_subject_datasets
+from thesis.datasets.mne_base import convert_dataset_to_nme, convert_dataset_to_subject
+from thesis.structs.preprocessor_structs import LoadTimePreprocessorConfig
 
 
 def load_subject_dataset_as_nme(dir: Path, max_subjects: int = None) -> dict[str, dict]:
@@ -133,7 +112,7 @@ def plot_ica_sources(ica, nme_dataset: dict[str, dict], subject_id: str, key: Su
     plt.show()
     plt.close(fig)
 
-def remove_dataset_artifacts(subjects: list[str], input_dataset_path: Path, output_dataset_dir: Path, highpass_cutoff=1.0, resample_freq=120):
+def remove_dataset_artifacts(subjects: list[str], input_dataset_path: Path, output_dataset_dir: Path, highpass_cutoff=1.0, resample_freq=None, do_ica=False):
     """
     Takes an nme dataset, runs a low pass filter over it, and then removes artifacts
 
@@ -157,23 +136,29 @@ def remove_dataset_artifacts(subjects: list[str], input_dataset_path: Path, outp
         print(f"Processing subject {subject_id}")
         subject_dataset = load_subject_dataset(input_file_path)
         mne_dataset = convert_dataset_to_nme(subject_dataset)
-        subject_icas = {}
-        for dataset_key, elem in mne_dataset.items():
-            raw = elem['data']
-            session_id = dataset_key[1]
-            if session_id not in subject_icas:
-                ica = create_ica_from_raw(raw, n_components=15)
-                subject_icas[session_id] = ica
+        if do_ica:
+            subject_icas = {}
+            for dataset_key, elem in mne_dataset.items():
+                raw = elem['data']
+                session_id = dataset_key[1]
+                if session_id not in subject_icas:
+                    ica = create_ica_from_raw(raw, n_components=15)
+                    subject_icas[session_id] = ica
 
         # Now we have an ica for each session and we can process the dataset
         new_nme_dataset = {}
         for dataset_key, elem in mne_dataset.items():
-            raw = elem['data']
-            filtered_raw = raw.copy().filter(highpass_cutoff, None)
-            session_id = dataset_key[1]
-            ica = subject_icas[session_id]
-            ica.apply(filtered_raw)
-            elem['data'] = filtered_raw
+            if highpass_cutoff is not None:
+                raw = elem['data']
+                filtered_raw = raw.copy().filter(highpass_cutoff, None)
+                elem['data'] = filtered_raw
+
+            if do_ica:
+                filtered_raw = elem['data']
+                session_id = dataset_key[1]
+                ica = subject_icas[session_id]
+                ica.apply(filtered_raw)
+                elem['data'] = filtered_raw
 
             # Resample the data
             if resample_freq is not None:
@@ -182,7 +167,7 @@ def remove_dataset_artifacts(subjects: list[str], input_dataset_path: Path, outp
             new_nme_dataset[dataset_key] = elem
         
         # Convert the mne dataset back to a subject dataset
-        subject_dataset = convert_dataset_to_subject(new_nme_dataset)
+        subject_dataset = validate_dataset(convert_dataset_to_subject(new_nme_dataset))
         save_subject_dataset(subject_dataset, output_file_path)
 
 def crop_dataset(subjects: list[str], input_dataset_path: Path, output_dataset_dir: Path):
@@ -215,7 +200,7 @@ def crop_dataset(subjects: list[str], input_dataset_path: Path, output_dataset_d
             plt.close(fig)
 
         # Convert the mne dataset back to a subject dataset
-        subject_dataset = convert_dataset_to_subject(mne_dataset)
+        subject_dataset = validate_dataset(convert_dataset_to_subject(mne_dataset))
         save_subject_dataset(subject_dataset, output_file_path)
 
 
@@ -229,6 +214,15 @@ if __name__ == "__main__":
     large_eeg_dataset_path = Path(__file__).parent / "large_eeg"
     kaya_dataset_path = large_eeg_dataset_path / "processed_data"
     kaya_filtered_dataset_path = large_eeg_dataset_path / "processed_data_ica_highpass_filtered_resampled_120"
+
+    braindecode_datasets_v2_path = Path(__file__).parent / "braindecode" / "datasets_v2"
+    lee_2019_unfiltered_v2 = braindecode_datasets_v2_path / "lee2019_512"
+    lee_2019_highpass_v2 = braindecode_datasets_v2_path / "lee2019_512_highpass_filtered"
+    shin_dataset_v2 = braindecode_datasets_v2_path / "shin_200"
+    shin_highpass_v2 = braindecode_datasets_v2_path / "shin_200_highpass_filtered"
+
+    kaya_filtered_dataset_v2 = large_eeg_dataset_path / "processed_data_highpass_filtered"
+    kaya_filtered_cropped_dataset_v2 = large_eeg_dataset_path / "processed_data_highpass_filtered_cropped"
 
     # # lee2019_nme_dataset = load_subject_dataset_as_nme(lee2019_dataset_path, max_subjects=2)
     # lee2019_filtered_nme_dataset = load_subject_dataset_as_nme(lee_2019_filtered_dataset_path, max_subjects=2)
@@ -263,10 +257,10 @@ if __name__ == "__main__":
 
 
 
-    input_dataset_path = kaya_filtered_dataset_path
+    input_dataset_path = "/Users/aidan/projects/engsci/year4/thesis/implementation/thesis/datasets/braindecode/datasets_data_v2/lee2019_512_highpass_filtered/train_intra_set"
 
     if False:
-        input_mne_dataset = load_subject_dataset_as_nme(input_dataset_path, max_subjects=2)
+        input_mne_dataset = load_subject_dataset_as_nme(input_dataset_path, max_subjects=None)
 
         subjects = list(input_mne_dataset.keys())
         subject_keys: dict[str, list[SubjectDatasetKey]] = {}
@@ -276,22 +270,45 @@ if __name__ == "__main__":
             print(f"Subject: {subject}")
             for run_key in run_keys:
                 print(f"\tRun: {run_key}")
-            
-        test_subject = subjects[0]
-        test_run_key = subject_keys[test_subject][0]
+        
+        reconstructed_dataset = {}
+        for si, test_subject in enumerate(subjects):
+            # test_subject = subjects[0]
+            # test_run_key = subject_keys[test_subject][0]
+            for sj, test_run_key in enumerate(subject_keys[test_subject]):
+                plot_highpass_signal(input_mne_dataset, test_subject, test_run_key, highpass=None, duration=120)
+                # plot_power_spectrum(input_mne_dataset, test_subject, test_run_key)
+                # generate_and_plot_ica(input_mne_dataset, test_subject, test_run_key)
 
-        plot_highpass_signal(input_mne_dataset, test_subject, test_run_key, highpass=None, duration=120)
-        plot_power_spectrum(input_mne_dataset, test_subject, test_run_key)
-        generate_and_plot_ica(input_mne_dataset, test_subject, test_run_key)
+                print(f"Subject {si}/{len(subjects)}, Run {sj}/{len(subject_keys[test_subject])}")
+                inp = input("Press enter to keep. Enter 'r' to reject: ")
+                if inp == "r":
+                    continue
+                if test_subject not in reconstructed_dataset:
+                    reconstructed_dataset[test_subject] = {}
+                reconstructed_dataset[test_subject][test_run_key] = input_mne_dataset[test_subject][test_run_key]
+
+            reconstructed_dataset[test_subject] = validate_dataset(convert_dataset_to_subject(reconstructed_dataset[test_subject]))
+            
+        # Convert the mne dataset back to a subject dataset
+        save_path = input_dataset_path.parent / f"{input_dataset_path.name}_selected"
+        save_path.mkdir(parents=True, exist_ok=True)
+        save_subject_datasets(reconstructed_dataset, save_path)
     
 
     if False:
-        output_dataset_path = input_dataset_path.parent / f"{input_dataset_path.name}_ica_highpass_filtered_resampled_120"
+        output_dataset_path = input_dataset_path.parent / f"{input_dataset_path.name}_highpass_filtered"
         subjects = get_subject_datasets_in_dir(input_dataset_path)
-        remove_dataset_artifacts(subjects, input_dataset_path, output_dataset_path)
+        # subjects = subjects[:3]
+        remove_dataset_artifacts(subjects, input_dataset_path, output_dataset_path, highpass_cutoff=1.0, resample_freq=None, do_ica=False)
     
-    if True:
-        output_dataset_path = input_dataset_path.parent / f"{input_dataset_path.name}_ica_highpass_filtered_resampled_120_cropped"
-        # subjects = get_subject_datasets_in_dir(input_dataset_path)
-        subjects = ["SubjectI", "SubjectF"]
+    if False:
+        output_dataset_path = input_dataset_path.parent / f"{input_dataset_path.name}_cropped"
+        subjects = get_subject_datasets_in_dir(input_dataset_path)
+        # subjects = ["SubjectI", "SubjectF"]
         crop_dataset(subjects, input_dataset_path, output_dataset_path)
+
+    if True:
+        preprocessor_config = LoadTimePreprocessorConfig(target_sample_rate=160)
+        datasets = load_subject_datasets(input_dataset_path, max_subjects=None, load_time_preprocessor_config=preprocessor_config)
+        pass

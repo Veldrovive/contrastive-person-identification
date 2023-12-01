@@ -4,6 +4,7 @@ experiments/
 checkpoints/
 .vscode/
 datasets_data/
+datasets_data_v2/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
