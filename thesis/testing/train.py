@@ -425,6 +425,8 @@ if __name__ == "__main__":
         # Then we are training from scratch
         model, optimizer = construct_model(config.embedding_model_config, config.head_config, device=training_config.device, lr=training_config.lr)
         summary(model, (1, model_config.C, model_config.T), col_names=("input_size", "output_size", "num_params"))
+        # For some reason the summary function moves the model to the cpu, so we need to move it back
+        model.to(training_config.device)
         checkpoint_config = None
         checkpoint_training_state = None
     
@@ -436,6 +438,11 @@ if __name__ == "__main__":
         wandb_mode = "online"
     wandb.init(project=training_config.wandb_project, mode=wandb_mode, name=training_config.wandb_run_name)
     training_state.run_id = wandb.run.id
+
+    # Upload the config file itself to wandb
+    if args.config_path is not None:
+        wandb.save(args.config_path.as_posix())
+
 
     # Create the data folder if it doesn't exist
     training_config.data_path.mkdir(parents=True, exist_ok=True)
