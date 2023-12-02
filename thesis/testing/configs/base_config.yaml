@@ -1,0 +1,95 @@
+random_seed: 0
+target_channels: [C3,C4,Cz,F3,F4,F7,F8,Fp1,Fp2,Fz,O1,O2,P3,P4,P7,P8,Pz,T7,T8]
+channel_blacklist: ["EMG1", "EMG2", "EMG3", "EMG4", "AFz", "STI 014", "Nz"]
+window_size_s: 8
+window_stride_s: 2
+
+embedding_model_config:
+  type: base_chambon
+  C: null
+  T: null
+  k: 63
+  m: 16
+
+head_config:
+  type: contrastive_head
+  c_loss_dimension: 128
+  head_style: linear
+  layer_sizes: [128]
+
+load_time_preprocess_config:
+  type: load_time_preprocessor
+  target_sample_rate: 120
+  band_pass_lower_cutoff: null
+  band_pass_upper_cutoff: null
+
+inference_time_preprocess_config:
+  type: meta_preprocessor
+  sample_rate: 120  # Must be the same as the target sample rate in the load_time_preprocess_config
+  target_sample_rate: null  # Superseded by the load time resampleing
+  stats_size_s: 0.5
+  clamping_sd: 5
+
+  use_baseline_correction: true
+  use_robust_scaler: true
+  use_clamping: true
+
+augmentation_config: null
+
+train_dataloader_config:
+  batch_size: 64
+  shuffle: true
+  num_workers: 0
+
+eval_dataloader_config:
+  batch_size: 16
+  shuffle: false
+  num_workers: 0
+
+datasets:
+  - name: physionet
+    path: /Users/aidan/projects/engsci/year4/thesis/implementation/thesis/datasets/braindecode/datasets_data_v2/physionet_160
+    split_config: { train_prop: 1, extrap_val_prop: 0, extrap_test_prop: 0, intra_val_prop: 0, intra_test_prop: 0, downstream_num_subjects: 0 }
+  
+  - name: lee2019_train
+    path: /Users/aidan/projects/engsci/year4/thesis/implementation/thesis/datasets/braindecode/datasets_data_v2/lee2019_512_highpass_filtered/train_intra_set
+    split_config: { train_prop: 0.9, extrap_val_prop: 0, extrap_test_prop: 0, intra_val_prop: 0.1, intra_test_prop: 0, downstream_num_subjects: -1 }
+
+  - name: lee2019_extrap
+    path: /Users/aidan/projects/engsci/year4/thesis/implementation/thesis/datasets/braindecode/datasets_data_v2/lee2019_512_highpass_filtered/extrap_set
+    split_config: { train_prop: 0, extrap_val_prop: 1, extrap_test_prop: 0, intra_val_prop: 0, intra_test_prop: 0, downstream_num_subjects: -1 }
+
+  - name: kaya_train
+    path: /Users/aidan/projects/engsci/year4/thesis/implementation/thesis/datasets/large_eeg/datasets_data/kaya_v2/train_intra_set
+    split_config: { train_prop: 0.95, extrap_val_prop: 0, extrap_test_prop: 0, intra_val_prop: 0.05, intra_test_prop: 0, downstream_num_subjects: 0 }
+
+  - name: kaya_extrap
+    path: /Users/aidan/projects/engsci/year4/thesis/implementation/thesis/datasets/large_eeg/datasets_data/kaya_v2/extrap_set
+    split_config: { train_prop: 0, extrap_val_prop: 1, extrap_test_prop: 0, intra_val_prop: 0, intra_test_prop: 0, downstream_num_subjects: 0 }
+
+training_config:
+  device: 'mps'
+  data_path: /Users/aidan/projects/engsci/year4/thesis/implementation/thesis/testing/experiments/chambon
+
+  wandb_project: 'thesis-default'
+  upload_wandb_checkpoint: false
+  wandb_online: true
+  wandb_run_name: null
+
+  epochs: 10
+  epoch_length: 1000
+
+  evaluate_first: True
+  evaluation_k: 5
+
+  run_extrap_val: true
+  run_intra_val: true
+  run_downstream_eval: true
+
+  downstream_lda_metadata_keys: [sex]
+  downstream_num_folds: 10
+
+  loss_temperature: 0.05
+  same_session_suppression: 0.0
+
+

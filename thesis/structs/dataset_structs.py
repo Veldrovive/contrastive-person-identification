@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from .preprocessor_structs import PreprocessorConfig
 from .augmentation_structs import AugmentationConfig
 
@@ -14,49 +16,10 @@ high_resolution_channel_equality_map = [  # We map from the 10/20 system to the 
 
 default_equality_map = [*high_resolution_channel_equality_map]
 
-
-
-# class DataloaderConfig(BaseModel):
-#     batch_size_train: int = Field(32, description="The batch size to use for training")
-#     batch_size_eval: int = Field(32, description="The batch size to use for evaluation")
-
-#     shuffle_train: bool = Field(True, description="Whether to shuffle the training data")
-#     shuffle_eval: bool = Field(False, description="Whether to shuffle the evaluation data")
-
-#     num_workers_train: int = Field(0, description="The number of workers to use for the dataloader")
-#     num_workers_eval: int = Field(0, description="The number of workers to use for the dataloader")
-
 class DataloaderConfig(BaseModel):
     batch_size: int = Field(32, description="The batch size to use for training")
     shuffle: bool = Field(True, description="Whether to shuffle the training data")
     num_workers: int = Field(0, description="The number of workers to use for the dataloader")
-
-class PhysionetMIDatasetConfig(BaseModel):
-    subject_ids: list[int] = Field(list(range(1, 109 + 1)), description="The subject ids to use for the dataset")
-    window_size_s: int = Field(..., description="The size of the window to use for the sliding window")
-    window_stride_s: int = Field(..., description="The stride of the window to use for the sliding window")
-    train_prop: float = Field(0.8, description="The proportion of subjects to use for training")
-    extrap_val_prop: float = Field(0.05, description="The proportion of subjects to use for validation in the extrapolation set")
-    extrap_test_prop: float = Field(0.05, description="The proportion of subjects to use for testing in the extrapolation set")
-    intra_val_prop: float = Field(0.05, description="The proportion of subjects to use for validation in the intra set")
-    intra_test_prop: float = Field(0.05, description="The proportion of subjects to use for testing in the intra set")
-
-    n_positive_train: int = Field(1, description="The number of positive samples to use in the training set")
-    m_negative_train: int = Field(1, description="The number of negative samples to use in the training set")
-    n_positive_eval: int = Field(0, description="The number of positive samples to use in the evaluation sets")
-    m_negative_eval: int = Field(0, description="The number of negative samples to use in the evaluation sets")
-
-
-    seed: int = Field(0, description="The seed to use for the random number generator")
-
-class WindowedContrastiveDatasetConfig(BaseModel):
-    target_freq: int = Field(120, description="The target frequency to downsample to")
-    target_channels: list[str] | None = Field(None, description="The target channels to use. None to automatically select channels")
-    toggle_direct_sum_on: bool = Field(False, description="If false then the shared subset of channels will be used. If true then the direct sum of the channels will be used")
-    channel_blacklist: list[str] = Field([], description="The channels to exclude from the dataset")
-    channel_equality_map: list[tuple[str, str]] = Field(default_equality_map, description="The channels to treat as equal. The first channel will be used as the representative channel.")
-
-    sample_over_subjects_toggle: bool = Field(False, description="If true, then each subject will have even representation over an epoch. If false, each subject will have representation proportional the number of samples they have")
 
 class ContrastiveSubjectDatasetConfig(BaseModel):
     target_channels: list[str] | None = Field(None, description="The target channels to use. None to automatically select channels")
@@ -98,3 +61,8 @@ class DatasetSplitConfig(BaseModel):
             raise ValidationError("The proportions must add up to 1")
         return self
     
+class DatasetConfig(BaseModel):
+    name: str = Field(..., description="The name of the dataset")
+    path: Path = Field(..., description="The path to the dataset")
+    split_config: DatasetSplitConfig = Field(..., description="The split config to use for the dataset")
+    max_subjects: int | None = Field(None, description="The maximum number of subjects to use. If None, then all subjects will be used")

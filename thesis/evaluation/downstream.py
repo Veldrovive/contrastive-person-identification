@@ -102,7 +102,11 @@ def compute_LDA_metrics(embeddings: np.ndarray, metadatas: list[dict], metadata_
         lda.fit(train_set[0], train_set[1])
 
         # And compute the metrics for individual samples
-        predictions = lda.predict(test_set[0])
+        try:
+            predictions = lda.predict(test_set[0])
+        except ValueError as e:
+            print(f"This error generally occurs when you have more folds than subjects in the downstream dataset.")
+            raise e
         precision, recall, f1, _ = precision_recall_fscore_support(test_set[1], predictions, average="binary")
         individual_total_precision += precision
         individual_total_recall += recall

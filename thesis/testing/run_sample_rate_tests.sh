@@ -1,119 +1,50 @@
-# python chambon_with_args.py \
-#     --evaluate_first \
-#     --run_intra_val \
-#     --run_extrap_val \
-#     --run_downstream_eval \
-#     --epochs 10 \
-#     --epoch_length 1024 \
-#     --train_batch_size 64 \
-#     --loss_temperature 0.05 \
-#     --window_size_s 8 \
-#     --wandb_online \
-#     --wandb_project "thesis-sample-rate-tests" \
-#     --wandb_run_name "r=160" \
-#     --sample_rate 160 \
+PROJECT_NAME="thesis-sample-rate-tests"
+CONFIG_PATH="/Users/aidan/projects/engsci/year4/thesis/implementation/thesis/testing/configs/base_config.yaml"
 
-# python chambon_with_args.py \
-#     --evaluate_first \
-#     --run_intra_val \
-#     --run_extrap_val \
-#     --run_downstream_eval \
-#     --epochs 10 \
-#     --epoch_length 1024 \
-#     --train_batch_size 64 \
-#     --loss_temperature 0.05 \
-#     --window_size_s 8 \
-#     --wandb_online \
-#     --wandb_project "thesis-sample-rate-tests" \
-#     --wandb_run_name "r=130" \
-#     --sample_rate 130 \
+python train.py \
+    --config-path "$CONFIG_PATH" \
+    --wandb-project-override "$PROJECT_NAME" \
+    --wandb-run-name-override "r=160" \
+    --sample-rate-override 160 \
 
-# python chambon_with_args.py \
-#     --evaluate_first \
-#     --run_intra_val \
-#     --run_extrap_val \
-#     --run_downstream_eval \
-#     --epochs 10 \
-#     --epoch_length 1024 \
-#     --train_batch_size 64 \
-#     --loss_temperature 0.05 \
-#     --window_size_s 8 \
-#     --wandb_online \
-#     --wandb_project "thesis-sample-rate-tests" \
-#     --wandb_run_name "r=100" \
-#     --sample_rate 100 \
+python train.py \
+    --config-path "$CONFIG_PATH" \
+    --wandb-project-override "$PROJECT_NAME" \
+    --wandb-run-name-override "r=130" \
+    --sample-rate-override 130 \
 
-# python chambon_with_args.py \
-#     --evaluate_first \
-#     --run_intra_val \
-#     --run_extrap_val \
-#     --run_downstream_eval \
-#     --epochs 10 \
-#     --epoch_length 1024 \
-#     --train_batch_size 64 \
-#     --loss_temperature 0.05 \
-#     --window_size_s 8 \
-#     --wandb_online \
-#     --wandb_project "thesis-sample-rate-tests" \
-#     --wandb_run_name "r=70" \
-#     --sample_rate 70 \
+python train.py \
+    --config-path "$CONFIG_PATH" \
+    --wandb-project-override "$PROJECT_NAME" \
+    --wandb-run-name-override "r=100" \
+    --sample-rate-override 100 \
 
-# python chambon_with_args.py \
-#     --evaluate_first \
-#     --run_intra_val \
-#     --run_extrap_val \
-#     --run_downstream_eval \
-#     --epochs 10 \
-#     --epoch_length 1024 \
-#     --train_batch_size 64 \
-#     --loss_temperature 0.05 \
-#     --window_size_s 8 \
-#     --wandb_online \
-#     --wandb_project "thesis-sample-rate-tests" \
-#     --wandb_run_name "r=40" \
-#     --sample_rate 40 \
+python train.py \
+    --config-path "$CONFIG_PATH" \
+    --wandb-project-override "$PROJECT_NAME" \
+    --wandb-run-name-override "r=70" \
+    --sample-rate-override 70 \
 
-python chambon_with_args.py \
-    --evaluate_first \
-    --run_intra_val \
-    --run_extrap_val \
-    --run_downstream_eval \
-    --epochs 10 \
-    --epoch_length 1024 \
-    --train_batch_size 64 \
-    --loss_temperature 0.05 \
-    --window_size_s 8 \
-    --wandb_online \
-    --wandb_project "thesis-sample-rate-tests" \
-    --wandb_run_name "r=30" \
-    --sample_rate 30 \
+python train.py \
+    --config-path "$CONFIG_PATH" \
+    --wandb-project-override "$PROJECT_NAME" \
+    --wandb-run-name-override "r=40" \
+    --sample-rate-override 40 \
 
-python chambon_with_args.py \
-    --evaluate_first \
-    --run_intra_val \
-    --run_extrap_val \
-    --run_downstream_eval \
-    --epochs 10 \
-    --epoch_length 1024 \
-    --train_batch_size 64 \
-    --loss_temperature 0.05 \
-    --window_size_s 8 \
-    --wandb_online \
-    --wandb_project "thesis-sample-rate-tests" \
-    --wandb_run_name "r=20" \
-    --sample_rate 20 \
+python train.py \
+    --config-path "$CONFIG_PATH" \
+    --wandb-project-override "$PROJECT_NAME" \
+    --wandb-run-name-override "r=30" \
+    --sample-rate-override 30 \
 
-python chambon_with_args.py \
-    --evaluate_first \
-    --run_intra_val \
-    --run_extrap_val \
-    --run_downstream_eval \
-    --epochs 10 \
-    --epoch_length 1024 \
-    --train_batch_size 64 \
-    --loss_temperature 0.05 \
-    --window_size_s 8 \
-    --wandb_online \
-    --wandb_project "thesis-sample-rate-tests" \
-    --wandb_run_name "r=10" \
-    --sample_rate 10 \
+python train.py \
+    --config-path "$CONFIG_PATH" \
+    --wandb-project-override "$PROJECT_NAME" \
+    --wandb-run-name-override "r=20" \
+    --sample-rate-override 20 \
+
+python train.py \
+    --config-path "$CONFIG_PATH" \
+    --wandb-project-override "$PROJECT_NAME" \
+    --wandb-run-name-override "r=10" \
+    --sample-rate-override 10 \

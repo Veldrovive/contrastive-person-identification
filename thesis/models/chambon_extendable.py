@@ -5,7 +5,7 @@ From https://arxiv.org/pdf/1707.03321.pdf as referenced by https://ieeexplore.ie
 import torch
 from torch import nn
 
-from thesis.structs.chambon_structs import ChambonExtendableConfig
+from thesis.structs import ChambonExtendableConfig
 
 class ChambonBlock(nn.Module):
     def __init__(self, in_channels, out_channels, kernel_size, stride, padding, pooling):

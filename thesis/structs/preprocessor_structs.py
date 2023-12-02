@@ -3,11 +3,11 @@ Defines configuration for the preprocessing options.
 """
 
 from pydantic import BaseModel, Field, validator
+from typing import Literal
 
-class PreprocessorConfig(BaseModel):
-    pass
+class MetaPreprocessorConfig(BaseModel):
+    type: Literal["meta_preprocessor"]
 
-class MetaPreprocessorConfig(PreprocessorConfig):
     sample_rate: int = Field(..., description="The sample rate of the data")
     target_sample_rate: int | None = Field(None, description="The target sample rate to downsample to")
     stats_size_s: float = Field(0.5, description="The size of the window to use for getting the sample stats")
@@ -17,7 +17,11 @@ class MetaPreprocessorConfig(PreprocessorConfig):
     use_robust_scaler: bool = Field(..., description="Whether to use robust scaler from sklearn")
     use_clamping: bool = Field(..., description="Whether to use clamping")
 
+PreprocessorConfig = MetaPreprocessorConfig  # Union of all preprocessor configs
+
 class LoadTimePreprocessorConfig(BaseModel):
+    type: Literal["load_time_preprocessor"]
+
     target_sample_rate: int | None = Field(None, description="The target sample rate to downsample to. Errors if base sample rate < target sample rate")
     band_pass_lower_cutoff: float | None = Field(None, description="The lower cutoff for the band pass filter")
     band_pass_upper_cutoff: float | None = Field(None, description="The upper cutoff for the band pass filter")

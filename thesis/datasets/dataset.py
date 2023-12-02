@@ -5,7 +5,7 @@ The main dataset class for the contrastive learning experiments
 from typing import Any, Callable, Optional, Tuple, Union, Dict, List
 from thesis.datasets.subject_dataset import SubjectDataset, SubjectID, SessionID, RunIndex
 from thesis.structs.dataset_structs import ContrastiveSubjectDatasetConfig, DataloaderConfig
-from thesis.preprocessing import PreprocessorConfig, construct_preprocess_fn
+from thesis.preprocessing import construct_preprocess_fn
 from thesis.augmentation import AugmentationConfig, construct_augmentation_fn
 import numpy as np
 import torch

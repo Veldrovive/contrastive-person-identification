@@ -1,111 +1,51 @@
-python chambon_with_args.py \
-    --evaluate_first \
-    --run_intra_val \
-    --run_extrap_val \
-    --run_downstream_eval \
-    --epochs 10 \
-    --epoch_length 1024 \
-    --train_batch_size 64 \
-    --loss_temperature 0.05 \
-    --window_size_s 8 \
-    --wandb_project "thesis-same-session-suppression" \
-    --wandb_run_name "S=0.3" \
-    --same_session_suppression 0.3 \
-    --sample_rate 120 \
-    --wandb_online \
+PROJECT_NAME="thesis-same-session-suppression"
+CONFIG_PATH="/Users/aidan/projects/engsci/year4/thesis/implementation/thesis/testing/configs/base_config.yaml"
 
-python chambon_with_args.py \
-    --evaluate_first \
-    --run_intra_val \
-    --run_extrap_val \
-    --run_downstream_eval \
-    --epochs 10 \
-    --epoch_length 1024 \
-    --train_batch_size 64 \
-    --loss_temperature 0.05 \
-    --window_size_s 8 \
-    --wandb_project "thesis-same-session-suppression" \
-    --wandb_run_name "S=0.5" \
-    --same_session_suppression 0.5 \
-    --sample_rate 120 \
-    --wandb_online \
+python train.py \
+    --config-path "$CONFIG_PATH" \
+    --wandb-project-override "$PROJECT_NAME" \
+    --wandb-run-name-override "S=0.3" \
+    --sample-rate-override 120 \
+    --same-session-suppression-override 0.3 \
 
-python chambon_with_args.py \
-    --evaluate_first \
-    --run_intra_val \
-    --run_extrap_val \
-    --run_downstream_eval \
-    --epochs 10 \
-    --epoch_length 1024 \
-    --train_batch_size 64 \
-    --loss_temperature 0.05 \
-    --window_size_s 8 \
-    --wandb_project "thesis-same-session-suppression" \
-    --wandb_run_name "S=0.1" \
-    --same_session_suppression 0.1 \
-    --sample_rate 120 \
-    --wandb_online \
+python train.py \
+    --config-path "$CONFIG_PATH" \
+    --wandb-project-override "$PROJECT_NAME" \
+    --wandb-run-name-override "S=0.5" \
+    --sample-rate-override 120 \
+    --same-session-suppression-override 0.5 \
 
-python chambon_with_args.py \
-    --evaluate_first \
-    --run_intra_val \
-    --run_extrap_val \
-    --run_downstream_eval \
-    --epochs 10 \
-    --epoch_length 1024 \
-    --train_batch_size 64 \
-    --loss_temperature 0.05 \
-    --window_size_s 8 \
-    --wandb_project "thesis-same-session-suppression" \
-    --wandb_run_name "S=0" \
-    --same_session_suppression 0 \
-    --sample_rate 120 \
-    --wandb_online \
+python train.py \
+    --config-path "$CONFIG_PATH" \
+    --wandb-project-override "$PROJECT_NAME" \
+    --wandb-run-name-override "S=0.1" \
+    --sample-rate-override 120 \
+    --same-session-suppression-override 0.1 \
 
-python chambon_with_args.py \
-    --evaluate_first \
-    --run_intra_val \
-    --run_extrap_val \
-    --run_downstream_eval \
-    --epochs 10 \
-    --epoch_length 1024 \
-    --train_batch_size 64 \
-    --loss_temperature 0.05 \
-    --window_size_s 8 \
-    --wandb_project "thesis-same-session-suppression" \
-    --wandb_run_name "S=0.8" \
-    --same_session_suppression 0.8 \
-    --sample_rate 120 \
-    --wandb_online \
+python train.py \
+    --config-path "$CONFIG_PATH" \
+    --wandb-project-override "$PROJECT_NAME" \
+    --wandb-run-name-override "S=0" \
+    --sample-rate-override 120 \
+    --same-session-suppression-override 0 \
 
-python chambon_with_args.py \
-    --evaluate_first \
-    --run_intra_val \
-    --run_extrap_val \
-    --run_downstream_eval \
-    --epochs 10 \
-    --epoch_length 1024 \
-    --train_batch_size 64 \
-    --loss_temperature 0.05 \
-    --window_size_s 8 \
-    --wandb_project "thesis-same-session-suppression" \
-    --wandb_run_name "S=0.9" \
-    --same_session_suppression 0.9 \
-    --sample_rate 120 \
-    --wandb_online \
+python train.py \
+    --config-path "$CONFIG_PATH" \
+    --wandb-project-override "$PROJECT_NAME" \
+    --wandb-run-name-override "S=0.8" \
+    --sample-rate-override 120 \
+    --same-session-suppression-override 0.8 \
 
-python chambon_with_args.py \
-    --evaluate_first \
-    --run_intra_val \
-    --run_extrap_val \
-    --run_downstream_eval \
-    --epochs 10 \
-    --epoch_length 1024 \
-    --train_batch_size 64 \
-    --loss_temperature 0.05 \
-    --window_size_s 8 \
-    --wandb_project "thesis-same-session-suppression" \
-    --wandb_run_name "S=0.99" \
-    --same_session_suppression 0.99 \
-    --sample_rate 120 \
-    --wandb_online \
+python train.py \
+    --config-path "$CONFIG_PATH" \
+    --wandb-project-override "$PROJECT_NAME" \
+    --wandb-run-name-override "S=0.9" \
+    --sample-rate-override 120 \
+    --same-session-suppression-override 0.9 \
+
+python train.py \
+    --config-path "$CONFIG_PATH" \
+    --wandb-project-override "$PROJECT_NAME" \
+    --wandb-run-name-override "S=0.99" \
+    --sample-rate-override 120 \
+    --same-session-suppression-override 0.99 \
