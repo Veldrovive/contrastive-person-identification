@@ -8,6 +8,7 @@ from thesis.utils import get_git_hash
 
 from .chambon import ChambonConfig, ChambonNet
 from .chambon_extendable import ChambonExtendableConfig, ChambonNetExtendable
+from .chambon_with_linear import ChambonWithLinearConfig, ChambonNetWithLinear
 from .contrastive_head import ContrastiveHeadConfig, ContrastiveHead, ContrastiveModel
 
 def construct_model(model_config, head_config, device='cpu', lr=1e-3):
@@ -18,6 +19,8 @@ def construct_model(model_config, head_config, device='cpu', lr=1e-3):
         model = ChambonNet(model_config)
     elif type(model_config) == ChambonExtendableConfig:
         model = ChambonNetExtendable(model_config)
+    elif type(model_config) == ChambonWithLinearConfig:
+        model = ChambonNetWithLinear(model_config)
     else:
         raise ValueError(f"Model config type {type(model_config)} not supported")
 

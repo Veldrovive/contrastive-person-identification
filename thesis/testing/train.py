@@ -137,6 +137,7 @@ def evaluate_model(training_state: TrainingState, training_config: TrainingConfi
 
     if training_config.run_downstream_eval:
         embedding_model = model.embedding_module
+        # embedding_model = model
         downstream_embeddings, downstream_metadatas = get_downstream_embeddings(training_config, embedding_model, dataloaders["downstream"])
         # Now we need to compute the LDA metrics
         for metadata_key in training_config.downstream_lda_metadata_keys:
@@ -317,7 +318,7 @@ if __name__ == "__main__":
         v2_braindecode_dataset_base_path = Path(__file__).parent.parent / 'datasets' / 'braindecode' / 'datasets_data_v2'
         hacking_dataset_config = DatasetConfig(
             name = "lee2019_train",
-            path = v2_braindecode_dataset_base_path / 'lee2019_512_highpass_filtered' / 'train_intra_set',
+            path = v2_braindecode_dataset_base_path / 'lee2019_512_highpass_filtered_v2' / 'train_intra_set',
             split_config = DatasetSplitConfig(train_prop=0.65, extrap_val_prop=0.25, extrap_test_prop=0, intra_val_prop=0.1, intra_test_prop=0),
             max_subjects = 4
         )
@@ -411,7 +412,19 @@ if __name__ == "__main__":
         "downstream": (downstream_dataset_config, config.eval_dataloader_config)
     }
 
-    loaders, num_channels, freq = get_dataloaders(config.datasets, dataset_configs, load_time_preprocessor_config=config.load_time_preprocess_config)
+    # We need to get the frequency of our output. We can do this by analyzing the preprocessors in the config
+    # If the inference_time_preprocess_config has a target_sample_rate, then we use that
+    # Otherwise we use the load_time_preprocess_config target_sample_rate
+    # Of neither exist this is an error because the frequency is unknown
+    freq = None
+    if config.inference_time_preprocess_config is not None and config.inference_time_preprocess_config.target_sample_rate is not None:
+        freq = config.inference_time_preprocess_config.target_sample_rate
+    elif config.load_time_preprocess_config is not None and config.load_time_preprocess_config.target_sample_rate is not None:
+        freq = config.load_time_preprocess_config.target_sample_rate
+    else:
+        raise ValueError("The frequency of the dataset is unknown. Please specify a target_sample_rate in either the load_time_preprocess_config or the inference_time_preprocess_config")
+
+    loaders, num_channels = get_dataloaders(config.datasets, dataset_configs, load_time_preprocessor_config=config.load_time_preprocess_config, memory_map=config.memory_mapped_data)
 
     # Set up model if it was not previously loaded from a checkpoints
     
@@ -424,9 +437,9 @@ if __name__ == "__main__":
             model_config.T = int(base_dataset_config.window_size_s*freq)
         # Then we are training from scratch
         model, optimizer = construct_model(config.embedding_model_config, config.head_config, device=training_config.device, lr=training_config.lr)
-        summary(model, (1, model_config.C, model_config.T), col_names=("input_size", "output_size", "num_params"))
+        summary(model, (1, model_config.C, model_config.T), col_names=("input_size", "output_size", "num_params"), device=training_config.device)
         # For some reason the summary function moves the model to the cpu, so we need to move it back
-        model.to(training_config.device)
+        # model.to(training_config.device)
         checkpoint_config = None
         checkpoint_training_state = None
     

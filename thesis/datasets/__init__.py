@@ -5,7 +5,8 @@ from .dataset import *
 def get_dataloaders(
     base_datasets: list[DatasetConfig],
     dataset_configs: dict[str, tuple[ContrastiveSubjectDatasetConfig, DataloaderConfig]],  # Keys are "train", "extrap_val", "extrap_test", "intra_val", "intra_test", "downstream". All keys must be present
-    load_time_preprocessor_config: LoadTimePreprocessorConfig
+    load_time_preprocessor_config: LoadTimePreprocessorConfig,
+    memory_map: bool = False
 ):
     """
     Creates dataloaders for the 5 major datasets as well as the downstream task dataset
@@ -34,7 +35,7 @@ def get_dataloaders(
         split_config = base_dataset_config.split_config
         n_subjects = base_dataset_config.max_subjects
 
-        dataset_subjects = get_subject_datasets_in_dir(dataset_path)
+        dataset_subjects = get_subject_datasets_in_dir_v2(dataset_path)
         if n_subjects is not None:
             dataset_subjects = dataset_subjects[:n_subjects]
         n_subjects = len(dataset_subjects)
@@ -47,7 +48,7 @@ def get_dataloaders(
         assert downstream_num_subjects <= n_subjects, "The number of downstream subjects must be less than or equal to the number of subjects in the dataset"
         downstream_subjects = dataset_subjects[:downstream_num_subjects]
 
-        subject_datasets = load_subject_datasets(dataset_path, subjects=dataset_subjects, load_time_preprocessor_config=load_time_preprocessor_config)
+        subject_datasets = load_subject_datasets_v2(dataset_path, subjects=dataset_subjects, load_time_preprocessor_config=load_time_preprocessor_config, memory_map=memory_map)
         subject_metadata_dataset = load_subject_metadata(dataset_path, subjects=dataset_subjects)
         # Get the frequency of this dataset
         dataset_freq = list(subject_datasets[dataset_subjects[0]].root.values())[0].metadata.freq
@@ -89,12 +90,11 @@ def get_dataloaders(
             dataloaders[dataset_type] = None
         else:
             contrastive_dataset = ContrastiveSubjectDataset(subject_dataset, contrastive_dataset_config, subject_metadata=subject_metadata)
-            loader = get_contrastive_subject_loader(contrastive_dataset, batch_size=dataloader_config.batch_size, shuffle=dataloader_config.shuffle, num_workers=dataloader_config.num_workers)
+            loader = get_contrastive_subject_loader(contrastive_dataset, batch_size=dataloader_config.batch_size, shuffle=dataloader_config.shuffle, num_workers=dataloader_config.num_workers, persistent_workers=True if dataloader_config.num_workers > 0 else False)
             dataloaders[dataset_type] = loader
 
     # Sanity checks:
     channels = None
-    freq = None
     for dataloader in dataloaders.values():
         if dataloader is None:
             continue
@@ -102,10 +102,5 @@ def get_dataloaders(
             channels = dataloader.dataset.channels
         else:
             assert channels == dataloader.dataset.channels, "All datasets must use the same channels"
-
-        if freq is None:
-            freq = dataloader.dataset.freq
-        else:
-            assert freq == dataloader.dataset.freq, "All datasets must use the same frequency"
     
-    return dataloaders, len(channels), freq
+    return dataloaders, len(channels)

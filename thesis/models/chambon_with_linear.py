@@ -1,18 +1,18 @@
 """
-From https://arxiv.org/pdf/1707.03321.pdf as referenced by https://ieeexplore.ieee.org/document/8918693
+A version of the Chambon model with a configurable number of linear layers on the end.
 """
 
 import torch
 from torch import nn
 
-from thesis.structs import ChambonConfig
+from thesis.structs import ChambonWithLinearConfig
 
-class ChambonNet(nn.Module):
+class ChambonNetWithLinear(nn.Module):
     """
     An implementation of the model used in the paper "A deep learning architecture for temporal sleep stage classification using multivariate and multimodal time series"
     """
-    def __init__(self, config: ChambonConfig):
-        super(ChambonNet, self).__init__()
+    def __init__(self, config: ChambonWithLinearConfig):
+        super(ChambonNetWithLinear, self).__init__()
 
         self.min_t = config.k * config.m
 
@@ -20,17 +20,25 @@ class ChambonNet(nn.Module):
         
         self.conv1 = nn.Conv2d(1, C_prime, (config.C, 1))
 
+        T = config.T
         p2 = (config.k - 1) / 2
         assert int(p2) == p2, "k must be odd"
         self.conv2 = nn.Conv2d(1, 8, (1, config.k), padding=(0, int(p2)))
         self.relu2 = nn.ReLU()
         self.maxpool2 = nn.MaxPool2d((1, config.m))
+        T = (T - config.k + 1 + 2 * int(p2)) // config.m
 
         p3 = (config.k - 1) / 2
         assert int(p3) == p3, "k must be odd"
         self.conv3 = nn.Conv2d(8, 8, (1, config.k), padding=(0, int(p3)))
         self.relu3 = nn.ReLU()
         self.maxpool3 = nn.MaxPool2d((1, config.m))
+        T = (T - config.k + 1 + 2 * int(p3)) // config.m
+
+        self.linear_layers = nn.ModuleList()
+        for i, size in enumerate(config.linear_sizes):
+            self.linear_layers.append(nn.Linear(8 * C_prime * T, size))
+            T = size
 
     def forward(self, x):
         # Reshape to (batch_size, C, T, 1)
@@ -59,12 +67,20 @@ class ChambonNet(nn.Module):
         
         # Flatten
         x = x.view(x.shape[0], -1)
+
+        # Linear layers
+        for layer in self.linear_layers:
+            x = layer(x)
         
         return x
 
 if __name__ == "__main__":
-    config = ChambonConfig(C=19, T=120, k=63, m=8, C_prime=64)
-    model = ChambonNet(config)
+    from torchinfo import summary
+    config = ChambonWithLinearConfig(C=19, T=8*120, k=63, m=16, C_prime=64, linear_sizes=[1024])
+    model = ChambonNetWithLinear(config)
+
+    summary(model, (32, config.C, config.T), device="cpu", col_names=("input_size", "output_size", "num_params"))
+
     test_input = torch.randn(32, config.C, config.T)
     output = model(test_input)
     print(f"Input shape: {test_input.shape}")

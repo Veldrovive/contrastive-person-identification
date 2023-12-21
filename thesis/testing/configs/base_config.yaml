@@ -23,10 +23,20 @@ load_time_preprocess_config:
   band_pass_lower_cutoff: null
   band_pass_upper_cutoff: null
 
+# inference_time_preprocess_config:
+#   type: meta_preprocessor
+#   sample_rate: 120  # Must be the same as the target sample rate in the load_time_preprocess_config
+#   target_sample_rate: null  # Superseded by the load time resampleing
+#   stats_size_s: 0.5
+#   clamping_sd: 5
+
+#   use_baseline_correction: true
+#   use_robust_scaler: true
+#   use_clamping: true
+
 inference_time_preprocess_config:
-  type: meta_preprocessor
-  sample_rate: 120  # Must be the same as the target sample rate in the load_time_preprocess_config
-  target_sample_rate: null  # Superseded by the load time resampleing
+  type: in_house_preprocessor
+  target_sample_rate: null
   stats_size_s: 0.5
   clamping_sd: 5
 
@@ -48,23 +58,23 @@ eval_dataloader_config:
 
 datasets:
   - name: physionet
-    path: /Users/aidan/projects/engsci/year4/thesis/implementation/thesis/datasets/braindecode/datasets_data_v2/physionet_160
+    path: /Users/aidan/projects/engsci/year4/thesis/implementation/thesis/datasets/braindecode/datasets_data_v2/physionet_160_v2
     split_config: { train_prop: 1, extrap_val_prop: 0, extrap_test_prop: 0, intra_val_prop: 0, intra_test_prop: 0, downstream_num_subjects: 0 }
   
   - name: lee2019_train
-    path: /Users/aidan/projects/engsci/year4/thesis/implementation/thesis/datasets/braindecode/datasets_data_v2/lee2019_512_highpass_filtered/train_intra_set
+    path: /Users/aidan/projects/engsci/year4/thesis/implementation/thesis/datasets/braindecode/datasets_data_v2/lee2019_512_highpass_filtered_v2/train_intra_set
     split_config: { train_prop: 0.9, extrap_val_prop: 0, extrap_test_prop: 0, intra_val_prop: 0.1, intra_test_prop: 0, downstream_num_subjects: -1 }
 
   - name: lee2019_extrap
-    path: /Users/aidan/projects/engsci/year4/thesis/implementation/thesis/datasets/braindecode/datasets_data_v2/lee2019_512_highpass_filtered/extrap_set
+    path: /Users/aidan/projects/engsci/year4/thesis/implementation/thesis/datasets/braindecode/datasets_data_v2/lee2019_512_highpass_filtered_v2/extrap_set
     split_config: { train_prop: 0, extrap_val_prop: 1, extrap_test_prop: 0, intra_val_prop: 0, intra_test_prop: 0, downstream_num_subjects: -1 }
 
   - name: kaya_train
-    path: /Users/aidan/projects/engsci/year4/thesis/implementation/thesis/datasets/large_eeg/datasets_data/kaya_v2/train_intra_set
+    path: /Users/aidan/projects/engsci/year4/thesis/implementation/thesis/datasets/large_eeg/datasets_data/kaya_v2/train_intra_set_v2
     split_config: { train_prop: 0.95, extrap_val_prop: 0, extrap_test_prop: 0, intra_val_prop: 0.05, intra_test_prop: 0, downstream_num_subjects: 0 }
 
   - name: kaya_extrap
-    path: /Users/aidan/projects/engsci/year4/thesis/implementation/thesis/datasets/large_eeg/datasets_data/kaya_v2/extrap_set
+    path: /Users/aidan/projects/engsci/year4/thesis/implementation/thesis/datasets/large_eeg/datasets_data/kaya_v2/extrap_set_v2
     split_config: { train_prop: 0, extrap_val_prop: 1, extrap_test_prop: 0, intra_val_prop: 0, intra_test_prop: 0, downstream_num_subjects: 0 }
 
 training_config:

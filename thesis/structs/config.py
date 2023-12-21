@@ -22,7 +22,9 @@ class Config(BaseModel):
     
     training_config: TrainingConfig = Field(...)
 
-    load_time_preprocess_config: LoadTimePreprocessorConfig = Field(..., description="The preprocessing that is applied when datasets are loaded")
+    memory_mapped_data: bool = Field(False, description="Whether to memory map the data")
+    num_workers: int = Field(0, description="The number of workers to use for the dataloader")
+    load_time_preprocess_config: LoadTimePreprocessorConfig | None = Field(None, description="The preprocessing that is applied when datasets are loaded")
     inference_time_preprocess_config: PreprocessorConfig = Field(..., description="The preprocessing that is applied when the sample is returned from the dataloader")
     augmentation_config: AugmentationConfig | None = Field(None, description="Inference time preprocessing that is only applied to the training set")
 

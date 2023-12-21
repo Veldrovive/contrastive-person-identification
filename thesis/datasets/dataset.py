@@ -150,16 +150,18 @@ class ContrastiveSubjectDataset(Dataset):
         Ensures that all elements of all datasets have the same frequency
         We handle channels separately
         """
-        # Verify that all datasets have the same frequency
-        self.freq = None
-        for unique_subject_id, dataset in self.datasets.items():
-            dataset = dataset.model_dump()
-            for dataset_key, element in dataset.items():
-                metadata = element['metadata']
-                if self.freq is None:
-                    self.freq = metadata['freq']
-                else:
-                    assert self.freq == metadata['freq'], "All datasets must have the same frequency"
+        # THIS IS NO LONGER NECESSARY. Datasets can now have different frequencies at load time.
+        # # Verify that all datasets have the same frequency
+        # self.freq = None
+        # for unique_subject_id, dataset in self.datasets.items():
+        #     dataset = dataset.model_dump()
+        #     for dataset_key, element in dataset.items():
+        #         metadata = element['metadata']
+        #         if self.freq is None:
+        #             self.freq = metadata['freq']
+        #         else:
+        #             assert self.freq == metadata['freq'], "All datasets must have the same frequency"
+        
         # Verify that all datasets have one subject
         for unique_subject_id, dataset in self.datasets.items():
             dataset = dataset.model_dump()
@@ -233,7 +235,8 @@ class ContrastiveSubjectDataset(Dataset):
         num_samples_per_window, num_samples_per_stride = self.compute_window_parameters(metadata['freq'])
         window = data[:, start_timestep:start_timestep + num_samples_per_window]
         channels = self.to_equated_channels(metadata['channels'])
-        return channels, window
+        freq = metadata['freq']
+        return channels, freq, window
 
     def description(self):
         """
@@ -320,9 +323,9 @@ class ContrastiveSubjectDataset(Dataset):
             self.preprocess_fn = construct_preprocess_fn(self.preprocessor_config)
         if self.augmentation_fn is None and self.augmentation_config is not None:
             self.augmentation_fn = construct_augmentation_fn(self.augmentation_config)
-        attempt_preprocess = lambda data: self.preprocess_fn(data) if self.preprocess_fn is not None else data
-        attempt_transform = lambda data: self.augmentation_fn(data) if self.augmentation_fn is not None else data
-        process_data = lambda data: attempt_transform(attempt_preprocess(data))
+        attempt_preprocess = lambda data, meta: self.preprocess_fn(data, meta) if self.preprocess_fn is not None else data
+        attempt_transform = lambda data, meta: self.augmentation_fn(data, meta) if self.augmentation_fn is not None else data
+        process_data = lambda data, meta: attempt_transform(attempt_preprocess(data, meta), meta)
 
         anchor = self.anchors[index]
         anchor_unique_subject_id, anchor_dataset_key, anchor_start_timestep = anchor
@@ -330,8 +333,8 @@ class ContrastiveSubjectDataset(Dataset):
 
         # We select the anchor sample
         anchor_sample = self.get_element(anchor_unique_subject_id, anchor_dataset_key, anchor_start_timestep)
-        anchor_channels, raw_anchor_window = anchor_sample
-        channel_corrected_anchor_window = self.process_sample_channels(anchor_channels, raw_anchor_window)
+        anchor_channels, anchor_freq, raw_anchor_window = anchor_sample
+        channel_corrected_anchor_window = torch.from_numpy(self.process_sample_channels(anchor_channels, raw_anchor_window)).float()
         if testing:
             # Then we process the data in steps and return each of them
             preprocessed_anchor_window = attempt_preprocess(channel_corrected_anchor_window)
@@ -343,14 +346,16 @@ class ContrastiveSubjectDataset(Dataset):
             }
         
         # If we aren't testing then just process the data as usual
-        anchor_window = process_data(channel_corrected_anchor_window)
         anchor_metadata = {
             'unique_subject_id': anchor_unique_subject_id,
             'dataset_key': anchor_dataset_key,
             'start_timestep': anchor_start_timestep,
+            'channels': anchor_channels,
+            'freq': anchor_freq,
         }
         if self.subject_metadata is not None:
             anchor_metadata.update(self.subject_metadata[anchor_unique_subject_id])
+        anchor_window = process_data(channel_corrected_anchor_window, anchor_metadata)
 
         # We first select the positive samples
         positive_set = self.subject_anchor_map[anchor_unique_subject_id]
@@ -372,18 +377,20 @@ class ContrastiveSubjectDataset(Dataset):
             positive = positive_set[np.random.choice(len(positive_set))]
             positive_unique_subject_id, positive_dataset_key, positive_start_timestep = positive
             positive_sample = self.get_element(positive_unique_subject_id, positive_dataset_key, positive_start_timestep)
-            positive_channels, raw_positive_window = positive_sample
-            positive_window = self.process_sample_channels(positive_channels, raw_positive_window)
-            positive_window = process_data(positive_window)
-            positive_samples.append(positive_window)
+            positive_channels, positive_freq, raw_positive_window = positive_sample
+            positive_window = torch.from_numpy(self.process_sample_channels(positive_channels, raw_positive_window)).float()
             positive_metadata.append({
                 'unique_subject_id': positive_unique_subject_id,
                 'dataset_key': positive_dataset_key,
                 'start_timestep': positive_start_timestep,
+                'channels': positive_channels,
+                'freq': positive_freq,
             })
             if self.subject_metadata is not None:
                 positive_metadata[-1].update(self.subject_metadata[positive_unique_subject_id])
-        positive_window = positive_samples[0] if self.n_pos == 1 else positive_samples
+            positive_window = process_data(positive_window, positive_metadata[-1])
+            positive_samples.append(positive_window)
+        positive_window = positive_samples[0] if self.n_pos == 1 else torch.tensor(positive_samples)
         positive_metadata = positive_metadata[0] if self.n_pos == 1 else positive_metadata
 
         # Then we select the negative samples
@@ -398,18 +405,487 @@ class ContrastiveSubjectDataset(Dataset):
             negative = negative_set[np.random.choice(len(negative_set))]
             negative_unique_subject_id, negative_dataset_key, negative_start_timestep = negative
             negative_sample = self.get_element(negative_unique_subject_id, negative_dataset_key, negative_start_timestep)
-            negative_channels, raw_negative_window = negative_sample
-            negative_window = self.process_sample_channels(negative_channels, raw_negative_window)
-            negative_window = process_data(negative_window)
-            negative_samples.append(negative_window)
+            negative_channels, negative_freq, raw_negative_window = negative_sample
+            negative_window = torch.from_numpy(self.process_sample_channels(negative_channels, raw_negative_window)).float()
             negative_metadata.append({
                 'unique_subject_id': negative_unique_subject_id,
                 'dataset_key': negative_dataset_key,
                 'start_timestep': negative_start_timestep,
+                'channels': negative_channels,
+                'freq': negative_freq,
             })
             if self.subject_metadata is not None:
                 negative_metadata[-1].update(self.subject_metadata[negative_unique_subject_id])
-        negative_window = negative_samples[0] if self.n_neg == 1 else negative_samples
+            negative_window = process_data(negative_window, negative_metadata[-1])
+            negative_samples.append(negative_window)
+            
+        negative_window = negative_samples[0] if self.n_neg == 1 else torch.tensor(negative_samples)
+        negative_metadata = negative_metadata[0] if self.n_neg == 1 else negative_metadata
+
+        return {
+            'anchor': anchor_window,
+            'anchor_metadata': anchor_metadata,
+            'positive': positive_window,
+            'positive_metadata': positive_metadata,
+            'negative': negative_window,
+            'negative_metadata': negative_metadata,
+        }
+
+class LowRefCountContrastiveSubjectDataset(Dataset):
+    def __init__(
+        self,
+        datasets: Dict[str, SubjectDataset],
+        config: ContrastiveSubjectDatasetConfig,
+        subject_metadata: Dict[str, dict] = None,
+        *args, **kwargs
+    ):
+        """
+        Parameters:
+            datasets: A dictionary mapping a unique subject id to subject dataset. Each subject dataset is assumed to only contain one subject with multiple sessions.
+        """
+        self.config = config
+        self.preprocessor_config = config.preprocessor_config
+        self.augmentation_config = config.augmentation_config
+        self.preprocess_fn = None
+        self.augmentation_fn = None
+
+        self.n_pos = config.n_pos
+        self.n_neg = config.n_neg
+
+        self.datasets = datasets
+        self.verify_dataset_compatibility()
+        self.channels = self.select_channels()
+        self.channel_to_index_map = {channel: index for index, channel in enumerate(self.channels)}
+
+        self.unique_subjects = set(datasets.keys())
+        self.window_size_s = self.config.window_size_s
+        self.window_stride_s = self.config.window_stride_s
+
+        self.max_samples_per_subject = config.max_samples_per_subject
+        self.anchors = self.compute_anchors()  # TODO: Update all references to use the new anchor format
+        self.subject_anchor_map = {}  # TODO: Update all references to use the new anchor format  # Maps from the unique subject id to a numpy array of anchor indices
+        for anchor_index in range(len(self.anchors[0])):
+            unique_subject_id = str(self.anchors[0][anchor_index], encoding='utf-8')
+            if unique_subject_id not in self.subject_anchor_map:
+                self.subject_anchor_map[unique_subject_id] = ([], [])  # Store the anchor index and the anchor session id
+            self.subject_anchor_map[unique_subject_id][0].append(anchor_index)
+            self.subject_anchor_map[unique_subject_id][1].append(str(self.anchors[2][anchor_index], encoding='utf-8'))
+        
+        # Convert the lists to numpy arrays
+        for unique_subject_id, anchor_list in self.subject_anchor_map.items():
+            np_anchor_index_list = np.array(anchor_list[0])
+            np_anchor_session_list = np.array(anchor_list[1]).astype(np.string_)
+            self.subject_anchor_map[unique_subject_id] = (np_anchor_index_list, np_anchor_session_list)
+
+        self.subject_metadata = subject_metadata
+        # If subject_metadata is not none, then we need to make sure that for every subject in the dataset there is metadata
+        if subject_metadata is not None:
+            for unique_subject_id in self.unique_subjects:
+                assert unique_subject_id in subject_metadata and subject_metadata[unique_subject_id] is not None, f"Subject {unique_subject_id} is not in the subject metadata"
+
+        self.get_sample_time = 0
+        self.channel_process_sample_time = 0
+        self.preprocess_sample_time = 0
+
+    def to_equated_channels(self, channels: List[str]) -> List[str]:
+        """
+        Converts the given channels to the equated channels using the config.channel_equality_map
+
+        This allows us to use 10/20 channels with 10/10 channels
+        """
+        channel_equality_map = {mapping[1]: mapping[0] for mapping in self.config.channel_equality_map}
+        return [channel_equality_map.get(channel, channel) for channel in channels]
+
+    def select_channels(self) -> List[str]:
+        """
+        Uses the set of datasets to select the channels to use.
+
+        If config.target_channels is given, we use those
+        If config.toggle_direct_sum_on is false, then we use the intersection of all channels
+        If config.toggle_direct_sum_on is true, then we use the direct sum of all channels
+        """
+        # If the target channels are explicitly set we can just use those
+        if self.config.target_channels is not None:
+            return self.config.target_channels
+
+        # To start, we build a list of all channels sets that we see in the dataset
+        all_channel_sets = list()
+        for unique_subject_id, dataset in self.datasets.items():
+            dataset = dataset.model_dump()
+            for element_key, element in dataset.items():
+                all_channel_sets.append(set(self.to_equated_channels(element['metadata']["channels"])))
+
+        # We then build the channel set we will use
+        if self.config.toggle_direct_sum_on:
+            # If we are using the direct sum, we just use the union of all channel sets
+            channel_set = set.union(*all_channel_sets)
+        else:
+            # If we are using the intersection, we use the intersection of all channel sets
+            channel_set = set.intersection(*all_channel_sets)
+
+        # We then remove any channels that are blacklisted
+        channel_set = channel_set.difference(self.config.channel_blacklist)
+        
+        channels = list(channel_set)
+        channels.sort()
+
+        return channels
+
+    def process_sample_channels(self, sample_channels: list[str], sample: np.ndarray | torch.Tensor) -> np.ndarray | torch.Tensor:
+        """
+        Takes the old sample of shape (old_channels, timesteps) and converts the channels to the self.channels
+        by rearranging the channels and introducing zeros where there is a new channel but no old channel
+        """
+        new_indices = [self.channel_to_index_map.get(channel, -1) for channel in sample_channels]
+        if isinstance(sample, np.ndarray):
+            new_sample = np.zeros((len(self.channels), sample.shape[1]))
+
+            # for new_index, old_index in enumerate(new_indices):
+            #     if old_index != -1:
+            #         new_sample[new_index] = sample[old_index]
+
+            # List comprehensions, zip, and list unpacking are faster than the above for loop
+            valid_indices = [(new_index, old_index) for old_index, new_index in enumerate(new_indices) if old_index != -1]
+            new_indices, old_indices = zip(*valid_indices)
+            new_sample[list(new_indices)] = sample[list(old_indices)]
+
+            # We could use np.where to accelerate the numpy further, but I feel like I'll just introduce bugs
+            # TODO: Maybe accelerate this
+        elif isinstance(sample, torch.Tensor):
+            # Torch should be faster still since it has better indexing for this task
+            new_indices = torch.tensor(new_indices)
+            new_sample = torch.zeros((len(self.channels), sample.shape[1]), dtype=sample.dtype, device=sample.device)
+            valid_mask = new_indices != -1
+            new_sample[valid_mask] = sample[new_indices[valid_mask]]
+
+        return new_sample
+
+    def compute_window_parameters(self, freq: int) -> tuple[int, int]:
+        """
+        Computes the number of samples in a single window given the frequency as well as the stride in samples
+
+        Frequency is given in Hz
+        """
+        return int(self.window_size_s * freq), int(self.window_stride_s * freq)
+
+    def verify_dataset_compatibility(self):
+        """
+        Verifies that all datasets are compatible with each other
+
+        Ensures that all elements of all datasets have the same frequency
+        We handle channels separately
+        """
+        # THIS IS NO LONGER NECESSARY. Datasets can now have different frequencies at load time.
+        # # Verify that all datasets have the same frequency
+        # self.freq = None
+        # for unique_subject_id, dataset in self.datasets.items():
+        #     dataset = dataset.model_dump()
+        #     for dataset_key, element in dataset.items():
+        #         metadata = element['metadata']
+        #         if self.freq is None:
+        #             self.freq = metadata['freq']
+        #         else:
+        #             assert self.freq == metadata['freq'], "All datasets must have the same frequency"
+        
+        # Verify that all datasets have one subject
+        for unique_subject_id, dataset in self.datasets.items():
+            dataset = dataset.model_dump()
+            dataset_subjects = [subject_id for subject_id, _, _ in dataset.keys()]
+            assert len(set(dataset_subjects)) == 1, "All datasets must have one subject"
+
+    def compute_anchors(self) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]: #List[Tuple[str, Tuple[SubjectID, SessionID, RunIndex], int]]:
+        """
+        Computes the full set of all anchors in the dataset
+
+        Each element of the list contains the unique subject id, the dataset key, and the start timestep
+
+        This version does not store a list of tuple since python has a copy-on-write policy for lists which means
+        replicating the dataset is very expensive and workers become very slow.
+
+        By storing the anchors as parallel numpy arrays, we can avoid this issue.
+        More information here: https://github.com/pytorch/pytorch/issues/13246#issuecomment-905703662
+        and here: https://pytorch.org/docs/stable/data.html#single-and-multi-process-data-loading
+        """
+        # First, we make a mapping from the unique subject id to a list of all anchors for that subject
+        unique_subject_anchors: Dict[str, list[tuple[str, (SubjectID, SessionID, RunIndex), int]]] = {}
+        for unique_subject_id, dataset in self.datasets.items():
+            dataset = dataset.model_dump()
+            for dataset_key, element in dataset.items():
+                num_samples = element['data'].shape[1]
+                metadata = element['metadata']
+                num_samples_per_window, num_samples_per_stride = self.compute_window_parameters(metadata['freq'])
+                for start_timestep in range(0, num_samples - num_samples_per_window, num_samples_per_stride):
+                    # anchors.append((unique_subject_id, dataset_key, start_timestep))
+                    if unique_subject_id not in unique_subject_anchors:
+                        unique_subject_anchors[unique_subject_id] = []
+                    if self.max_samples_per_subject is None or len(unique_subject_anchors[unique_subject_id]) < self.max_samples_per_subject:
+                        unique_subject_anchors[unique_subject_id].append((unique_subject_id, dataset_key, start_timestep))
+        
+        # Then, if we are not re-sampling over subjects, we can just return the list of anchors concatenated
+        if not self.config.sample_over_subjects_toggle:
+            anchors = []
+            for _, anchor_list in unique_subject_anchors.items():
+                anchors.extend(anchor_list)
+        else:
+            # But if we are, we need to extend the list of anchors for each subject such that they have the same number as the maximum
+            # We do this by randomly sampling from the list of anchors for each subject
+            max_num_anchors = max([len(anchor_list) for _, anchor_list in unique_subject_anchors.items()])
+            anchors = []
+            rng = np.random.default_rng(self.config.random_seed)
+            for _, anchor_list in unique_subject_anchors.items():
+                num_anchors_to_add = max_num_anchors - len(anchor_list)
+                anchors.extend(anchor_list)
+
+                while num_anchors_to_add > 0:
+                    if num_anchors_to_add > len(anchor_list):
+                        # Add the entire list again
+                        anchors.extend(anchor_list)
+                        num_anchors_to_add -= len(anchor_list)
+                    else:
+                        # Add a random sample of the list
+                        to_add = rng.choice(len(anchor_list), size=num_anchors_to_add, replace=False)
+                        anchors.extend([anchor_list[index] for index in to_add])
+                        num_anchors_to_add = 0
+        
+        # Convert these anchors to numpy arrays
+        # Strings (like the IDs) must be stored as square arrays
+        # Like so `np.array(strings).astype(np.string_)`
+        # Then when we we need to access them `str(strings_byte[i], encoding='utf-8')`
+        num_samples = len(anchors)
+
+        # Extract the anchors to separate arrays
+        unique_subject_ids, dataset_keys, start_timesteps = zip(*anchors)
+        subject_ids, session_ids, run_indices = zip(*dataset_keys)
+
+        # And convert them all to numpy arrays
+        np_unique_subject_ids = np.array(unique_subject_ids).astype(np.string_)
+        np_subject_ids = np.array(subject_ids).astype(np.string_)
+        np_session_ids = np.array(session_ids).astype(np.string_)
+        np_run_indices = np.array(run_indices)
+        np_start_timesteps = np.array(start_timesteps)
+
+        return np_unique_subject_ids, np_subject_ids, np_session_ids, np_run_indices, np_start_timesteps
+        
+    def __len__(self):
+        return len(self.anchors[0])
+
+    def get_element(self, unique_subject_id: str, dataset_key: Tuple[SubjectID, SessionID, RunIndex], start_timestep: int) -> np.ndarray:
+        """
+        Gets the element from the dataset given the unique subject id, dataset key, and start timestep and
+        extracts the window from the element
+        """
+        dataset = self.datasets[unique_subject_id]
+        dataset = dataset.model_dump()
+        element = dataset[dataset_key]
+        data = element['data']
+        metadata = element['metadata']
+        num_samples_per_window, num_samples_per_stride = self.compute_window_parameters(metadata['freq'])
+        window = data[:, start_timestep:start_timestep + num_samples_per_window]
+        channels = self.to_equated_channels(metadata['channels'])
+        freq = metadata['freq']
+        return channels, freq, window
+
+    def description(self):
+        """
+        Prints a description of the dataset
+        """
+        length = len(self)
+        # Get the number of unique subjects
+        num_unique_subjects = len(self.unique_subjects)
+        # Get the median number of anchors per subject and the IQR
+        num_anchors_per_subject = [len(anchor_list) for _, anchor_list in self.subject_anchor_map.items()]
+        median_num_anchors_per_subject = np.median(num_anchors_per_subject)
+        iqr_num_anchors_per_subject = np.subtract(*np.percentile(num_anchors_per_subject, [75, 25]))
+        max_num_anchors_per_subject = max(num_anchors_per_subject)
+        min_num_anchors_per_subject = min(num_anchors_per_subject)
+
+        num_channels = len(self.channels)
+
+        window_size_samples, window_stride_samples = self.compute_window_parameters(self.freq)
+
+        print(f"Dataset description:")
+        print(f"\t----------")
+        print(f"\tSampling over subjects: {self.config.sample_over_subjects_toggle}")
+        print(f"\tLength: {length}")
+        print(f"\tNumber of unique subjects: {num_unique_subjects}")
+        print(f"\tMedian number of anchors per subject: {median_num_anchors_per_subject}")
+        print(f"\tIQR number of anchors per subject: {iqr_num_anchors_per_subject}")
+        print(f"\tRange number of anchors per subject: {max_num_anchors_per_subject - min_num_anchors_per_subject} ({max_num_anchors_per_subject} - {min_num_anchors_per_subject})")
+        print(f"\t----------")
+        print(f"\tUsing channel direct sum: {self.config.toggle_direct_sum_on}")
+        print(f"\tNumber of channels: {num_channels}")
+        print(f"\tChannels: {self.channels}")
+        print(f"\tFrequency: {self.freq}")
+        print(f"\tWindow size: {self.window_size_s} ({window_size_samples} samples)")
+        print(f"\tWindow stride: {self.window_stride_s} ({window_stride_samples} samples)")
+        print(f"\t----------")
+        print(f"\tTotal time spent getting samples: {self.get_sample_time}")
+        print(f"\tTotal time spent processing samples for channels: {self.channel_process_sample_time}")
+        print(f"\tTotal time spent preprocessing samples: {self.preprocess_sample_time}")
+
+        return {
+            "length": length,
+            "num_unique_subjects": num_unique_subjects,
+            "median_num_anchors_per_subject": median_num_anchors_per_subject,
+            "iqr_num_anchors_per_subject": iqr_num_anchors_per_subject,
+            "max_num_anchors_per_subject": max_num_anchors_per_subject,
+            "min_num_anchors_per_subject": min_num_anchors_per_subject,
+            "num_channels": num_channels,
+            "channels": self.channels,
+            "freq": self.freq,
+        }
+
+    def visualize_item(self, index):
+        """
+        Uses MNE-python to visualize the item
+        """
+        item = self.__getitem__(index, testing=True)
+        raw_anchor = item['raw_anchor']
+        preprocessed_anchor = item['preprocessed_anchor']
+        augmented_anchor = item['augmented_anchor']
+        augmentation_residuals = augmented_anchor - preprocessed_anchor
+
+        ch_types = ['eeg' for _ in self.channels]
+        info = mne.create_info(ch_names=self.channels, sfreq=self.freq, ch_types=ch_types)
+        raw_anchor = mne.io.RawArray(raw_anchor, info)
+        preprocessed_anchor = mne.io.RawArray(preprocessed_anchor, info)
+        augmented_anchor = mne.io.RawArray(augmented_anchor, info)
+        augmentation_residuals = mne.io.RawArray(augmentation_residuals, info)
+
+        raw_anchor.plot(n_channels=10, scalings='auto', duration=self.window_size_s, show=False, title="Raw Anchor")
+        preprocessed_anchor.plot(n_channels=10, scalings='auto', duration=self.window_size_s, show=False, title="Preprocessed Anchor")
+        augmented_anchor.plot(n_channels=10, scalings='auto', duration=self.window_size_s, show=False, title="Augmented Anchor")
+        augmentation_residuals.plot(n_channels=10, scalings='auto', duration=self.window_size_s, show=False, title="Augmentation Residuals")
+
+        plt.show()
+
+    def extract_anchor_index(self, index: int) -> tuple[str, (SubjectID, SessionID, RunIndex), int]:
+        """
+        Converts back from the condensed numpy format to the tuple format
+        """
+        unique_subject_id = str(self.anchors[0][index], encoding='utf-8')
+        dataset_key = (str(self.anchors[1][index], encoding='utf-8'), str(self.anchors[2][index], encoding='utf-8'), self.anchors[3][index])
+        start_timestep = self.anchors[4][index]
+        return unique_subject_id, dataset_key, start_timestep
+
+    def __getitem__(self, index: int, testing: bool = False):
+        """
+        Returns a single sample from the dataset
+
+        Anchor is selected based on index.
+        """
+        # Create the preprocess function is required
+        if self.preprocess_fn is None and self.preprocessor_config is not None:
+            self.preprocess_fn = construct_preprocess_fn(self.preprocessor_config)
+        if self.augmentation_fn is None and self.augmentation_config is not None:
+            self.augmentation_fn = construct_augmentation_fn(self.augmentation_config)
+        attempt_preprocess = lambda data, meta: self.preprocess_fn(data, meta) if self.preprocess_fn is not None else data
+        attempt_transform = lambda data, meta: self.augmentation_fn(data, meta) if self.augmentation_fn is not None else data
+        process_data = lambda data, meta: attempt_transform(attempt_preprocess(data, meta), meta)
+
+        # anchor = self.anchors[index]
+        anchor = self.extract_anchor_index(index)
+        anchor_unique_subject_id, anchor_dataset_key, anchor_start_timestep = anchor
+        _, anchor_session, _ = anchor_dataset_key
+
+        # We select the anchor sample
+        anchor_sample = self.get_element(anchor_unique_subject_id, anchor_dataset_key, anchor_start_timestep)
+        anchor_channels, anchor_freq, raw_anchor_window = anchor_sample
+        channel_corrected_anchor_window = torch.from_numpy(self.process_sample_channels(anchor_channels, raw_anchor_window)).float()
+        if testing:
+            # Then we process the data in steps and return each of them
+            preprocessed_anchor_window = attempt_preprocess(channel_corrected_anchor_window)
+            augmented_anchor_window = attempt_transform(preprocessed_anchor_window)
+            return {
+                'raw_anchor': channel_corrected_anchor_window,
+                'preprocessed_anchor': preprocessed_anchor_window,
+                'augmented_anchor': augmented_anchor_window,
+            }
+        
+        # If we aren't testing then just process the data as usual
+        anchor_metadata = {
+            'unique_subject_id': anchor_unique_subject_id,
+            'dataset_key': anchor_dataset_key,
+            'start_timestep': anchor_start_timestep,
+            'channels': self.channels,
+            'freq': anchor_freq,
+        }
+        if self.subject_metadata is not None:
+            anchor_metadata.update(self.subject_metadata[anchor_unique_subject_id])
+        anchor_window = process_data(channel_corrected_anchor_window, anchor_metadata)
+
+        # We first select the positive samples
+        positive_set_indices, positive_set_sessions = self.subject_anchor_map[anchor_unique_subject_id]
+        if self.config.positive_separate_session:
+            # We restrict the positive set to samples where the session is different from the anchor session
+            # restricted_positive_set = [positive for positive in positive_set if positive[1][1] != anchor_session]
+            # In the new format, we need to select the indices where the positive_set_sessions do not match the anchor session
+            # Note that we need to convert anchor_session into a np.string_ to match the type of positive_set_sessions
+            mismatched_sessions = positive_set_sessions != np.string_(anchor_session)
+            restricted_positive_set = positive_set_indices[mismatched_sessions]
+            if len(restricted_positive_set) == 0:
+                if self.config.error_on_no_separate_session:
+                    raise ValueError("No separate session for positive samples")
+                else:
+                    # If there are no separate sessions, we just use the same session
+                    restricted_positive_set = positive_set_indices
+                    # TODO: Remove the anchor itself in this case.
+            positive_set_indices = restricted_positive_set
+        
+        positive_samples = []
+        positive_metadata = []
+        for _ in range(self.n_pos):
+            # positive = positive_set[np.random.choice(len(positive_set))]
+            # Select a random anchor index from the positive set
+            positive_index = np.random.choice(positive_set_indices)
+            positive = self.extract_anchor_index(positive_index)
+            positive_unique_subject_id, positive_dataset_key, positive_start_timestep = positive
+            positive_sample = self.get_element(positive_unique_subject_id, positive_dataset_key, positive_start_timestep)
+            positive_channels, positive_freq, raw_positive_window = positive_sample
+            positive_window = torch.from_numpy(self.process_sample_channels(positive_channels, raw_positive_window)).float()
+            positive_metadata.append({
+                'unique_subject_id': positive_unique_subject_id,
+                'dataset_key': positive_dataset_key,
+                'start_timestep': positive_start_timestep,
+                'channels': self.channels,
+                'freq': positive_freq,
+            })
+            if self.subject_metadata is not None:
+                positive_metadata[-1].update(self.subject_metadata[positive_unique_subject_id])
+            positive_window = process_data(positive_window, positive_metadata[-1])
+            positive_samples.append(positive_window)
+        positive_window = positive_samples[0] if self.n_pos == 1 else torch.tensor(positive_samples)
+        positive_metadata = positive_metadata[0] if self.n_pos == 1 else positive_metadata
+
+        # Then we select the negative samples
+        negative_samples = []
+        negative_metadata = []
+        negative_subject_ids = list(self.unique_subjects.difference({anchor_unique_subject_id}))
+        for _ in range(self.n_neg):
+            # The negative sample can be from any subject other than the anchor subject
+            negative_subject_id = np.random.choice(negative_subject_ids)
+            # We then select a random sample from the negative subject
+            negative_set_indices, _ = self.subject_anchor_map[negative_subject_id]
+            # negative = negative_set[np.random.choice(len(negative_set))]
+            negative_index = np.random.choice(negative_set_indices)
+            negative = self.extract_anchor_index(negative_index)
+            negative_unique_subject_id, negative_dataset_key, negative_start_timestep = negative
+            negative_sample = self.get_element(negative_unique_subject_id, negative_dataset_key, negative_start_timestep)
+            negative_channels, negative_freq, raw_negative_window = negative_sample
+            negative_window = torch.from_numpy(self.process_sample_channels(negative_channels, raw_negative_window)).float()
+            negative_metadata.append({
+                'unique_subject_id': negative_unique_subject_id,
+                'dataset_key': negative_dataset_key,
+                'start_timestep': negative_start_timestep,
+                'channels': self.channels,
+                'freq': negative_freq,
+            })
+            if self.subject_metadata is not None:
+                negative_metadata[-1].update(self.subject_metadata[negative_unique_subject_id])
+            negative_window = process_data(negative_window, negative_metadata[-1])
+            negative_samples.append(negative_window)
+            
+        negative_window = negative_samples[0] if self.n_neg == 1 else torch.tensor(negative_samples)
         negative_metadata = negative_metadata[0] if self.n_neg == 1 else negative_metadata
 
         return {
@@ -430,7 +906,13 @@ def subject_dataset_collate(samples):
         if key.endswith("_metadata"):
             batch[key] = [sample[key] for sample in samples]
         else:
-            batch[key] = torch.from_numpy(np.array([sample[key] for sample in samples]))
+            # batch[key] = torch.from_numpy(np.array([sample[key] for sample in samples]))
+            # They are already tensors now
+            all_samples = [sample[key] for sample in samples]
+            if len(samples) == 0:
+                batch[key] = torch.empty((0, 0))
+            else:
+                batch[key] = torch.stack(all_samples)
     return batch
 
 def get_contrastive_subject_loader(dataset: ContrastiveSubjectDataset, batch_size: int, shuffle: bool, num_workers: int, *args, **kwargs):

@@ -109,6 +109,8 @@ def get_dataset_split(dataset: Dict[str, SubjectDataset], train_p, extrap_val_p,
     The extrapolation set only includes subjects never in the training set
     The interpolation set is samples from subjects seen in training, but the samples themselves were never seen
     """
+    # TODO: Use window_size_seconds instead of window_size_samples. Currently we assume that the full dataset has the same sample rate
+    # but this is not necessarily true. Using time instead of samples will allow us to handle this case.
     rng = np.random.default_rng(seed)
 
     all_subject_ids = list(dataset.keys())
@@ -257,6 +259,41 @@ def save_subject_dataset(dataset: SubjectDataset, path: str | Path):
     dataset_dict = dataset.dict()
     torch.save(dataset_dict, path)
 
+def save_subject_dataset_v2(dataset: SubjectDataset, path: str | Path):
+    """
+    Saves the dataset in the updated format to the given path
+    """
+    if isinstance(path, Path):
+        path = path.absolute().as_posix()
+
+    Path(path).mkdir(parents=True, exist_ok=True)
+
+    for (subject_id, session_id, run_index), element in dataset.dict().items():
+        # Save the data for the run as a numpy array and the metadata as a json file
+        # We also include information about the number of samples and total time
+        # The name of each file is {subject_id}_{session_id}_{run_index}.(npy|json)
+        base_name_str = f"{subject_id}_{session_id}_{run_index}"
+        data_path = os.path.join(path, f"{base_name_str}.npy")
+        metadata_path = os.path.join(path, f"{base_name_str}.json")
+
+        # Create the memory mapped array
+        fp = np.memmap(data_path, dtype=element['data'].dtype, mode='w+', shape=element['data'].shape)
+        fp[:] = element['data'][:]
+
+        # In order to load a memory mapped, we must also excplicitly save the shape and dtype
+        element['data_format'] = {}
+        element['data_format']['shape'] = element['data'].shape
+        element['data_format']['dtype'] = element['data'].dtype.name
+
+        # We also include the total time in seconds
+        element['data_format']['total_time_s'] = element['data'].shape[1] / element['metadata']['freq']
+
+        # The metadata file is everything except the data
+        del element['data']
+        with open(metadata_path, "w") as f:
+            json.dump(element, f, indent=4)
+
+
 def save_subject_datasets(datasets: Dict[str, SubjectDataset], dir: str | Path):
     """
     Saves a list of datasets to the given directory
@@ -267,6 +304,17 @@ def save_subject_datasets(datasets: Dict[str, SubjectDataset], dir: str | Path):
         dir = dir.absolute().as_posix()
     for dataset_key, dataset in datasets.items():
         save_subject_dataset(dataset, os.path.join(dir, f"{dataset_key}.pt"))
+
+def save_subject_datasets_v2(datasets: Dict[str, SubjectDataset], dir: str | Path):
+    """
+    Saves a list of datasets to the given directory
+
+    Each is saved in the subdir: /{dataset_key}
+    """
+    if isinstance(dir, Path):
+        dir = dir.absolute().as_posix()
+    for dataset_key, dataset in datasets.items():
+        save_subject_dataset_v2(dataset, os.path.join(dir, dataset_key))
 
 def load_subject_dataset(path: str | Path, load_time_preprocessor_config: LoadTimePreprocessorConfig = None) -> SubjectDataset:
     """
@@ -298,6 +346,58 @@ def load_subject_dataset(path: str | Path, load_time_preprocessor_config: LoadTi
         dataset = validate_dataset(convert_dataset_to_subject(mne_datasets))
     return dataset
 
+def load_subject_dataset_v2(path: str | Path, load_time_preprocessor_config: LoadTimePreprocessorConfig | None = None, memory_map: bool = False) -> SubjectDataset:
+    """
+    Loads the dataset from the given directory
+
+    If memory_map is True, then the data will be loaded in numpy memory maps
+    In memory mapped mode, the load time preprocessor must be None or an error will be raised
+    """
+    if isinstance(path, Path):
+        path = path.absolute().as_posix()
+    
+    dataset = {}
+    file_roots = set([Path(file).stem for file in os.listdir(path)])
+    for file_root in file_roots:
+        # For each root, we construct a run 
+        with open(os.path.join(path, f"{file_root}.json"), "r") as f:
+            metadata = json.load(f)
+
+        data_format = metadata['data_format']
+        del metadata['data_format']
+
+        data_path = os.path.join(path, f"{file_root}.npy")
+        if memory_map:
+            assert load_time_preprocessor_config is None, "Cannot use memory map mode with load time preprocessing"
+            data = np.memmap(data_path, dtype=data_format['dtype'], mode='r', shape=tuple(data_format['shape']))
+        else:
+            data = np.memmap(data_path, dtype=data_format['dtype'], mode='r', shape=tuple(data_format['shape']))
+            data = np.array(data)  # Convert to a normal numpy array
+
+        # The dataset key can be constructed using metadata file ({meta.subject}, {meta.session}, {meta.run})
+        dataset_key = (metadata['subject'], metadata['session'], metadata['run'])
+        dataset[dataset_key] = ElementDict(data=data, **metadata)
+    
+    dataset = validate_dataset(dataset)
+    if load_time_preprocessor_config is not None:
+        mne_datasets = convert_dataset_to_nme(dataset)
+        if load_time_preprocessor_config.target_sample_rate is not None:
+            # Then we check if the sample rate is different
+            new_sample_rate = load_time_preprocessor_config.target_sample_rate
+            for subject, mne_dataset in mne_datasets.items():
+                assert mne_dataset["data"].info["sfreq"] >= new_sample_rate, f"Cannot upsample data. Current sample rate: {mne_dataset.info['sfreq']}, target sample rate: {new_sample_rate}"
+                if mne_dataset["data"].info["sfreq"] != new_sample_rate:
+                    mne_dataset["data"].resample(load_time_preprocessor_config.target_sample_rate)
+        
+        lower_cutoff = load_time_preprocessor_config.band_pass_lower_cutoff
+        upper_cutoff = load_time_preprocessor_config.band_pass_upper_cutoff
+        if lower_cutoff is not None or upper_cutoff is not None:
+            for subject, mne_dataset in mne_datasets.items():
+                mne_dataset["data"].filter(l_freq=lower_cutoff, h_freq=upper_cutoff)
+        dataset = validate_dataset(convert_dataset_to_subject(mne_datasets))
+    return dataset
+
+
 def get_subject_datasets_in_dir(dir: str | Path) -> list[str]:
     """
     Returns the dataset keys for all subjects in the given directory
@@ -308,6 +408,19 @@ def get_subject_datasets_in_dir(dir: str | Path) -> list[str]:
     for file in os.listdir(dir):
         if file.endswith(".pt"):
             dataset_key = file[:-3]
+            dataset_keys.append(dataset_key)
+    return dataset_keys
+
+def get_subject_datasets_in_dir_v2(dir: str | Path) -> list[str]:
+    """
+    Returns the dataset keys for all subjects in the given directory
+    """
+    if isinstance(dir, Path):
+        dir = dir.absolute().as_posix()
+    dataset_keys = []
+    for file in os.listdir(dir):
+        if os.path.isdir(os.path.join(dir, file)):
+            dataset_key = file
             dataset_keys.append(dataset_key)
     return dataset_keys
 
@@ -324,6 +437,25 @@ def load_subject_datasets(dir: str, max_subjects: int | None = None, subjects: l
             dataset_key = file[:-3]
             if subjects is None or dataset_key in subjects:
                 datasets[dataset_key] = load_subject_dataset(os.path.join(dir, file), load_time_preprocessor_config)
+        if max_subjects is not None and len(datasets) >= max_subjects:
+            break
+    end_time = time.time()
+    print(f"Loaded {len(datasets)} datasets in {round(end_time - start_time, 2)} seconds")
+    return datasets
+
+def load_subject_datasets_v2(dir: str, max_subjects: int | None = None, subjects: list[str] | None = None, load_time_preprocessor_config: LoadTimePreprocessorConfig | None = None, memory_map: bool = False) -> Dict[str, SubjectDataset]:
+    """
+    Loads a list of datasets from the given directory
+
+    Each is loaded in the subdir: /{dataset_key}
+    """
+    datasets = {}
+    start_time = time.time()
+    for file in os.listdir(dir):
+        if os.path.isdir(os.path.join(dir, file)):
+            dataset_key = file
+            if subjects is None or dataset_key in subjects:
+                datasets[dataset_key] = load_subject_dataset_v2(os.path.join(dir, file), load_time_preprocessor_config, memory_map)
         if max_subjects is not None and len(datasets) >= max_subjects:
             break
     end_time = time.time()

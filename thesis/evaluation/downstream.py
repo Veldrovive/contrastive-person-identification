@@ -107,7 +107,7 @@ def compute_LDA_metrics(embeddings: np.ndarray, metadatas: list[dict], metadata_
         except ValueError as e:
             print(f"This error generally occurs when you have more folds than subjects in the downstream dataset.")
             raise e
-        precision, recall, f1, _ = precision_recall_fscore_support(test_set[1], predictions, average="binary")
+        precision, recall, f1, _ = precision_recall_fscore_support(test_set[1], predictions, average="binary", zero_division=0)
         individual_total_precision += precision
         individual_total_recall += recall
         individual_total_f1 += f1
@@ -179,7 +179,7 @@ def compute_LDA_metrics(embeddings: np.ndarray, metadatas: list[dict], metadata_
             true_labels_sets.append(samples[1])
             predicted_labels_sets.append(subject_predictions)
             
-            subject_precision, subject_recall, subject_f1, _ = precision_recall_fscore_support(samples[1], subject_predictions, average="binary")
+            subject_precision, subject_recall, subject_f1, _ = precision_recall_fscore_support(samples[1], subject_predictions, average="binary", zero_division=0)
 
             subject_scores = {
                 "precision": subject_precision,

@@ -78,7 +78,7 @@ def preprocessor_factory(config: MetaPreprocessorConfig, track_times: bool = Fal
     baseline_correction_time = 0
     robust_scaler_time = 0
     clamp_time = 0
-    def preprocess(data):
+    def preprocess(data, metadata):
         """
         Preprocesses the data
         """
